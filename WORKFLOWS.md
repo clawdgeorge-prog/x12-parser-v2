@@ -182,6 +182,8 @@ Use it when the next question is:
 - “Can I compare claims at scale?”
 - “Can I load this into a dashboard?”
 
+The same export path now supports directory-level batch processing for the `csv` and `sqlite` flows, so you can point the CLI at a folder of X12 files and get one aggregated, row-oriented bundle instead of exporting file-by-file. Those batch outputs preserve file lineage with `source_file` and `source_path` columns.
+
 ---
 
 ## 6. 835 reconciliation bundle

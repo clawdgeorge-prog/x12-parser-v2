@@ -56,6 +56,14 @@ Writes:
 - `service_lines.csv`
 - `entities.csv`
 
+You can also point the CLI at a directory to aggregate all parsed files into one row-oriented export bundle:
+
+```bash
+python3 -m src.cli tests/fixtures/ --format csv -o out/csv_batch
+```
+
+Batch exports also emit `batch_summary.json`, and `parse_failures.json` if any files in the directory fail to parse. Aggregated row outputs include `source_file` and `source_path` columns.
+
 ### SQLite-ready export
 
 ```bash
@@ -63,6 +71,14 @@ python3 -m src.cli tests/fixtures/sample_835_rich.edi --format sqlite -o out/sql
 ```
 
 Writes normalized CSVs plus `schema.sql` and `IMPORT_GUIDE.txt`.
+
+Directory input is supported here too:
+
+```bash
+python3 -m src.cli tests/fixtures/ --format sqlite -o out/sqlite_batch
+```
+
+The SQLite bundle aggregates envelope and row exports across every parsed file in the directory and includes source-trace columns for downstream loading.
 
 ### Analytics-native export bundle
 

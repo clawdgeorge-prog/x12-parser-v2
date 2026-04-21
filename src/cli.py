@@ -1,48 +1,17 @@
 #!/usr/bin/env python3
 """
 X12 Parse CLI — parse 835/837 files and emit structured output.
-
-Supports output formats:
-  json    — full nested JSON (default)
-  ndjson  — newline-delimited JSON (one record per line)
-  csv     — flat CSV files (claims, service lines, entities)
-  sqlite  — normalized CSV bundle + schema.sql ready for SQLite import
-  analytics — analytics-oriented CSV bundle for BI / reconciliation
-  analytics-parquet — optional Parquet analytics bundle (requires `pip install -e .[parquet]`, currently pandas + pyarrow)
-  reconcile — 835 reconciliation bundle / JSON report
-
-Usage:
-    python3 -m src.cli <input.edi> [-o <output.json>]
-    python3 -m src.cli <input.edi> --format ndjson
-    python3 -m src.cli <input.edi> --format csv -o output_dir/
-    python3 -m src.cli <input.edi> --format sqlite -o output_dir/
-    python3 -m src.cli <input.edi> --format analytics -o analytics_dir/
-    python3 -m src.cli <input.edi> --format analytics-parquet -o analytics_parquet_dir/
-    python3 -m src.cli <input.edi> --format reconcile --reference-csv expected_claims.csv -o reconcile_dir/
-    python3 -m src.cli <input.edi> --summary
-
-Examples:
-    python3 -m src.cli tests/fixtures/sample_835.edi
-    python3 -m src.cli tests/fixtures/sample_835.edi -o parsed.json
-    python3 -m src.cli tests/fixtures/sample_835.edi --format ndjson
-    python3 -m src.cli tests/fixtures/sample_835.edi --format csv -o extracts/
-    python3 -m src.cli tests/fixtures/sample_835.edi --format sqlite -o db_export/
-    python3 -m src.cli tests/fixtures/sample_835_rich.edi --format analytics -o analytics/
-    python3 -m src.cli tests/fixtures/sample_835_rich.edi --format analytics-parquet -o analytics_parquet/
-    python3 -m src.cli tests/fixtures/sample_835.edi --compact
-    python3 -m src.cli tests/fixtures/sample_835.edi --summary
-    python3 -m src.cli tests/fixtures/sample_837_prof.edi --summary
 """
 from __future__ import annotations
+
 import argparse
 import json
 import sys
 from pathlib import Path
 
-# Add project root to path
-
-from src.parser import X12Parser
 from src import exporter
+from src.batch import build_batch_json, discover_input_files, parse_inputs
+from src.parser import X12Parser
 from src.reconcile import read_reference_claims_csv, reconcile_data, write_reconciliation_bundle
 
 
@@ -56,8 +25,7 @@ def _fmt_money(v) -> str:
         return str(v)
 
 
-def _format_summary(data: dict) -> str:
-    """Produce a human-readable summary of the parsed X12 data."""
+def _format_single_summary(data: dict) -> str:
     lines = []
     for ic_idx, ic in enumerate(data.get("interchanges", [])):
         sender = ic.get("isa06_sender", "?")
@@ -84,7 +52,6 @@ def _format_summary(data: dict) -> str:
                     lines.append("    (no summary — unrecognized transaction type)")
                     continue
 
-                # ── 835 summary ──────────────────────────────────────────────
                 if set_id == "835":
                     lines.append(f"    Billed:       {_fmt_money(summary.get('total_billed_amount'))}")
                     lines.append(f"    Paid:         {_fmt_money(summary.get('total_paid_amount'))}")
@@ -104,66 +71,6 @@ def _format_summary(data: dict) -> str:
                         lines.append(f"    ⚠ Duplicate claim IDs: {', '.join(summary['duplicate_claim_ids'])}")
                     lines.append(f"    Payer:       {summary.get('payer_name', '?')}")
                     lines.append(f"    Provider:     {summary.get('provider_name', '?')}")
-                    if summary.get("discrepancies"):
-                        lines.append(f"\n    ⚠ Financial discrepancies ({len(summary['discrepancies'])}):")
-                        for disc in summary["discrepancies"]:
-                            disc_type = disc.get("type", "")
-                            if disc_type == "billed_mismatch":
-                                lines.append(
-                                    f"      [{disc_type}] claim {disc['claim_id']}: "
-                                    f"CLP billed {_fmt_money(disc.get('clp_billed', 0))} "
-                                    f"vs SVC sum {_fmt_money(disc.get('sum_svc_billed', 0))} "
-                                    f"(diff {_fmt_money(disc.get('difference', 0))})"
-                                )
-                            elif disc_type == "paid_mismatch":
-                                lines.append(
-                                    f"      [{disc_type}] claim {disc['claim_id']}: "
-                                    f"CLP paid {_fmt_money(disc.get('clp_paid', 0))} "
-                                    f"vs SVC sum {_fmt_money(disc.get('sum_svc_paid', 0))} "
-                                    f"(diff {_fmt_money(disc.get('difference', 0))})"
-                                )
-                            elif disc_type == "zero_pay_inconsistency":
-                                lines.append(
-                                    f"      [{disc_type}] claim {disc['claim_id']}: "
-                                    f"status={disc.get('status_code', '?')} "
-                                    f"but SVC paid {_fmt_money(disc.get('svc_paid', 0))}"
-                                )
-                            elif disc_type == "cas_adjustment_mismatch":
-                                lines.append(
-                                    f"      [{disc_type}] claim {disc['claim_id']}: "
-                                    f"CAS sum {_fmt_money(disc.get('cas_sum', 0))} "
-                                    f"vs CLP adj {_fmt_money(disc.get('clp_adjustment', 0))}"
-                                )
-                            else:
-                                # Fallback for any new types
-                                lines.append(
-                                    f"      [{disc_type}] claim {disc.get('claim_id', '?')}: "
-                                    f"{disc.get('description', '')}"
-                                )
-                    if summary.get("plb_count", 0) > 0:
-                        lines.append(f"\n    PLB adjustments ({summary['plb_count']}):")
-                        ps = summary.get("plb_summary", {})
-                        for code, amount in ps.get("adjustment_by_code", {}).items():
-                            label = ps.get("adjustment_labels", {}).get(code, code)
-                            lines.append(f"      {code} ({label}): {_fmt_money(amount)}")
-                        lines.append(f"    Total PLB: {_fmt_money(ps.get('total_plb_adjustment'))}")
-
-                    # Claim details
-                    claims = summary.get("claims", [])
-                    if claims:
-                        lines.append(f"\n    Claim details:")
-                        for cl in claims:
-                            status = cl.get("status_label", cl.get("status_code", "?"))
-                            cat = cl.get("status_category", "")
-                            cat_str = f" [{cat}]" if cat else ""
-                            lines.append(
-                                f"      {cl['claim_id']}: "
-                                f"billed {_fmt_money(cl['clp_billed'])} "
-                                f"paid {_fmt_money(cl['clp_paid'])} "
-                                f"status={status}{cat_str}"
-                            )
-
-                # ── 837 summary ──────────────────────────────────────────────
                 elif set_id == "837":
                     variant = summary.get("variant", "?")
                     variant_indicator = summary.get("variant_indicator", "")
@@ -175,35 +82,35 @@ def _format_summary(data: dict) -> str:
                     lines.append(f"    HL levels:   {summary.get('hl_count', '?')}")
                     lines.append(f"    Billing provider: {summary.get('billing_provider', '?')}")
                     lines.append(f"    Payer:       {summary.get('payer_name', '?')}")
-                    bht_id = summary.get("bht_id")
-                    bht_date = summary.get("bht_date")
-                    if bht_id:
-                        lines.append(f"    BHT ID:      {bht_id}")
-                    if bht_date:
-                        lines.append(f"    BHT date:    {bht_date}")
-                    if summary.get("duplicate_claim_ids"):
-                        lines.append(f"    ⚠ Duplicate claim IDs: {', '.join(summary['duplicate_claim_ids'])}")
-                    # Hierarchy tree
-                    hierarchy = summary.get("hierarchy", {})
-                    hl_tree = hierarchy.get("hl_tree", []) if isinstance(hierarchy, dict) else hierarchy
-                    if hl_tree:
-                        lines.append(f"\n    HL hierarchy:")
-                        for entry in hl_tree:
-                            if not isinstance(entry, dict):
-                                lines.append(f"      {entry}")
-                                continue
-                            hl_id = entry.get("id", "?")
-                            parent = entry.get("parent_id")
-                            role = entry.get("level_role", "?")
-                            code = entry.get("level_code", "?")
-                            parent_str = f" (parent HL@{parent})" if parent else ""
-                            lines.append(f"      HL@{hl_id} level={code} role={role}{parent_str}")
-
-                # ── Other ───────────────────────────────────────────────────
                 else:
                     lines.append(f"    Claims:      {summary.get('claim_count', summary.get('segment_count', '?'))}")
 
     return "\n".join(lines)
+
+
+def _format_summary(data: dict) -> str:
+    if data.get("batch"):
+        parts = []
+        for doc in data.get("documents", []):
+            parts.append(f"# FILE: {doc.get('source_file', '')}")
+            parts.append(_format_single_summary(doc))
+        if data.get("failures"):
+            parts.append("# FAILURES")
+            for failure in data.get("failures", []):
+                parts.append(f"- {failure['source_file']}: {failure['error']}")
+        return "\n\n".join(parts)
+    return _format_single_summary(data)
+
+
+def _load_input(path: Path) -> dict:
+    if path.is_file():
+        return X12Parser.from_file(path).to_dict()
+
+    files = discover_input_files(path)
+    if not files:
+        raise FileNotFoundError(f"No supported X12 files found in directory: {path}")
+    documents, failures = parse_inputs(files)
+    return build_batch_json(documents, failures)
 
 
 def main() -> None:
@@ -212,7 +119,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("file", type=Path, help="Input X12 EDI file")
+    parser.add_argument("file", type=Path, help="Input X12 EDI file or directory")
     parser.add_argument("-o", "--output", type=Path, help="Output file or directory (format-dependent)")
     parser.add_argument("--compact", action="store_true", help="No indentation in JSON output")
     parser.add_argument(
@@ -237,13 +144,11 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        p = X12Parser.from_file(args.file)
-        data = p.to_dict()
+        data = _load_input(args.file)
     except Exception as exc:
         print(f"ERROR parsing {args.file}: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    # ── Summary mode (human-readable) ───────────────────────────────────────
     if args.summary:
         text = _format_summary(data)
         if args.output:
@@ -253,7 +158,6 @@ def main() -> None:
             print(text)
         return
 
-    # ── Structured output modes ───────────────────────────────────────────────
     if args.format == "json":
         indent = None if args.compact else 2
         text = json.dumps(data, indent=indent, ensure_ascii=False)
@@ -264,19 +168,15 @@ def main() -> None:
             print(text)
 
     elif args.format == "ndjson":
-        # NDJSON goes to file or stdout
         if args.output:
             with open(args.output, "w") as f:
                 count = exporter.emit_ndjson(data, file=f)
             print(f"[OK] Written {count} NDJSON records: {args.output}")
         else:
-            count = exporter.emit_ndjson(data)
-            # count not printed to stdout since emit writes to sys.stdout already
+            exporter.emit_ndjson(data)
 
     elif args.format == "csv":
         out_dir = args.output or Path(".")
-        if not args.output:
-            out_dir = Path(".")
         counts = exporter.write_csv(data, out_dir)
         total = sum(counts.values())
         for fname, cnt in sorted(counts.items()):
@@ -285,8 +185,6 @@ def main() -> None:
 
     elif args.format == "sqlite":
         out_dir = args.output or Path(".")
-        if not args.output:
-            out_dir = Path(".")
         counts = exporter.write_sqlite_bundle(data, out_dir)
         total = sum(counts.values())
         for fname, cnt in sorted(counts.items()):
@@ -295,8 +193,6 @@ def main() -> None:
 
     elif args.format == "analytics":
         out_dir = args.output or Path(".")
-        if not args.output:
-            out_dir = Path(".")
         counts = exporter.write_analytics_bundle(data, out_dir)
         total = sum(counts.values())
         for fname, cnt in sorted(counts.items()):
@@ -305,8 +201,6 @@ def main() -> None:
 
     elif args.format == "analytics-parquet":
         out_dir = args.output or Path(".")
-        if not args.output:
-            out_dir = Path(".")
         try:
             counts = exporter.write_analytics_parquet_bundle(data, out_dir)
         except RuntimeError as exc:

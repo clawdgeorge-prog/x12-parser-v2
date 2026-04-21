@@ -21,6 +21,7 @@ import pathlib
 import sys
 from typing import Any, Iterator, List, Optional, TextIO
 
+
 try:  # Optional dependency for Parquet output.
     import pandas as pd  # type: ignore
 except Exception:  # pragma: no cover - exercised via explicit failure path tests
@@ -45,109 +46,126 @@ def _fmt_money(v: Any) -> str:
     except (TypeError, ValueError):
         return ""
 
+def _iter_documents(data: dict) -> Iterator[dict]:
+    if data.get("batch"):
+        yield from data.get("documents", [])
+    else:
+        yield data
+
+
+def _iter_document_contexts(data: dict) -> Iterator[tuple[dict, str, str]]:
+    for document in _iter_documents(data):
+        yield document, _safe(document.get("source_file", "")), _safe(document.get("source_path", ""))
+
 
 def _build_835_claim_records(data: dict) -> Iterator[dict]:
     """Yield one claim record dict per 835 CLP loop."""
-    for ic in data.get("interchanges", []):
-        ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
-        isa_sender = _safe(ic.get("isa06_sender", ""))
-        isa_receiver = _safe(ic.get("isa08_receiver", ""))
-        for fg in ic.get("functional_groups", []):
-            gs_ctrl = _safe(fg.get("header", {}).get("elements", {}).get("e6", ""))
-            gs_version = _safe(fg.get("header", {}).get("elements", {}).get("e8", ""))
-            for ts in fg.get("transactions", []):
-                if ts.get("set_id") != "835":
-                    continue
-                summary = ts.get("summary", {})
-                st_ctrl = _safe(ts.get("header", {}).get("elements", {}).get("e2", ""))
-                payer = _safe(summary.get("payer_name", ""))
-                provider = _safe(summary.get("provider_name", ""))
-                payment_amount = _fmt_money(summary.get("payment_amount"))
-                check_trace = _safe(summary.get("check_trace", ""))
-                bpr_method = _safe(summary.get("bpr_payment_method", ""))
-                for claim in summary.get("claims", []):
-                    yield {
-                        "interchange_ctrl": ic_ctrl,
-                        "isa_sender": isa_sender,
-                        "isa_receiver": isa_receiver,
-                        "gs_ctrl": gs_ctrl,
-                        "gs_version": gs_version,
-                        "st_ctrl": st_ctrl,
-                        "transaction_type": "835",
-                        "claim_id": _safe(claim.get("claim_id", "")),
-                        "status_code": _safe(claim.get("status_code", "")),
-                        "status_label": _safe(claim.get("status_label", "")),
-                        "status_category": _safe(claim.get("status_category", "")),
-                        "patient_name": _safe(claim.get("patient_name", "")),
-                        "clp_billed": _fmt_money(claim.get("clp_billed")),
-                        "clp_allowed": _fmt_money(claim.get("clp_allowed")),
-                        "clp_paid": _fmt_money(claim.get("clp_paid")),
-                        "clp_adjustment": _fmt_money(claim.get("clp_adjustment")),
-                        "svc_billed": _fmt_money(claim.get("svc_billed")),
-                        "svc_paid": _fmt_money(claim.get("svc_paid")),
-                        "service_line_count": _safe(claim.get("service_line_count", "")),
-                        "has_billed_discrepancy": str(claim.get("has_billed_discrepancy", False)),
-                        "has_paid_discrepancy": str(claim.get("has_paid_discrepancy", False)),
-                        "adjustment_group_codes": _safe(
-                            ",".join(c.get("code", "") for c in claim.get("adjustment_group_codes", []))
-                        ),
-                        "payer_name": payer,
-                        "provider_name": provider,
-                        "payment_amount": payment_amount,
-                        "check_trace": check_trace,
-                        "bpr_payment_method": bpr_method,
-                    }
+    for document, source_file, source_path in _iter_document_contexts(data):
+        for ic in document.get("interchanges", []):
+            ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
+            isa_sender = _safe(ic.get("isa06_sender", ""))
+            isa_receiver = _safe(ic.get("isa08_receiver", ""))
+            for fg in ic.get("functional_groups", []):
+                gs_ctrl = _safe(fg.get("header", {}).get("elements", {}).get("e6", ""))
+                gs_version = _safe(fg.get("header", {}).get("elements", {}).get("e8", ""))
+                for ts in fg.get("transactions", []):
+                    if ts.get("set_id") != "835":
+                        continue
+                    summary = ts.get("summary", {})
+                    st_ctrl = _safe(ts.get("header", {}).get("elements", {}).get("e2", ""))
+                    payer = _safe(summary.get("payer_name", ""))
+                    provider = _safe(summary.get("provider_name", ""))
+                    payment_amount = _fmt_money(summary.get("payment_amount"))
+                    check_trace = _safe(summary.get("check_trace", ""))
+                    bpr_method = _safe(summary.get("bpr_payment_method", ""))
+                    for claim in summary.get("claims", []):
+                        yield {
+                            "source_file": source_file,
+                            "source_path": source_path,
+                            "interchange_ctrl": ic_ctrl,
+                            "isa_sender": isa_sender,
+                            "isa_receiver": isa_receiver,
+                            "gs_ctrl": gs_ctrl,
+                            "gs_version": gs_version,
+                            "st_ctrl": st_ctrl,
+                            "transaction_type": "835",
+                            "claim_id": _safe(claim.get("claim_id", "")),
+                            "status_code": _safe(claim.get("status_code", "")),
+                            "status_label": _safe(claim.get("status_label", "")),
+                            "status_category": _safe(claim.get("status_category", "")),
+                            "patient_name": _safe(claim.get("patient_name", "")),
+                            "clp_billed": _fmt_money(claim.get("clp_billed")),
+                            "clp_allowed": _fmt_money(claim.get("clp_allowed")),
+                            "clp_paid": _fmt_money(claim.get("clp_paid")),
+                            "clp_adjustment": _fmt_money(claim.get("clp_adjustment")),
+                            "svc_billed": _fmt_money(claim.get("svc_billed")),
+                            "svc_paid": _fmt_money(claim.get("svc_paid")),
+                            "service_line_count": _safe(claim.get("service_line_count", "")),
+                            "has_billed_discrepancy": str(claim.get("has_billed_discrepancy", False)),
+                            "has_paid_discrepancy": str(claim.get("has_paid_discrepancy", False)),
+                            "adjustment_group_codes": _safe(
+                                ",".join(c.get("code", "") for c in claim.get("adjustment_group_codes", []))
+                            ),
+                            "payer_name": payer,
+                            "provider_name": provider,
+                            "payment_amount": payment_amount,
+                            "check_trace": check_trace,
+                            "bpr_payment_method": bpr_method,
+                        }
 
 
 def _build_837_claim_records(data: dict) -> Iterator[dict]:
     """Yield one claim record dict per 837 CLM loop."""
-    for ic in data.get("interchanges", []):
-        ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
-        isa_sender = _safe(ic.get("isa06_sender", ""))
-        isa_receiver = _safe(ic.get("isa08_receiver", ""))
-        for fg in ic.get("functional_groups", []):
-            gs_ctrl = _safe(fg.get("header", {}).get("elements", {}).get("e6", ""))
-            gs_version = _safe(fg.get("header", {}).get("elements", {}).get("e8", ""))
-            for ts in fg.get("transactions", []):
-                if ts.get("set_id") != "837":
-                    continue
-                summary = ts.get("summary", {})
-                st_ctrl = _safe(ts.get("header", {}).get("elements", {}).get("e2", ""))
-                variant = _safe(summary.get("variant", ""))
-                variant_indicator = _safe(summary.get("variant_indicator", ""))
-                billing_provider = _safe(summary.get("billing_provider", ""))
-                payer = _safe(summary.get("payer_name", ""))
-                submitter = _safe(summary.get("submitter_name", ""))
-                subscriber = _safe(summary.get("subscriber_name", ""))
-                patient = _safe(summary.get("patient_name", ""))
-                bht_id = _safe(summary.get("bht_id", ""))
-                bht_date = _safe(summary.get("bht_date", ""))
-                for claim in summary.get("claims", []):
-                    yield {
-                        "interchange_ctrl": ic_ctrl,
-                        "isa_sender": isa_sender,
-                        "isa_receiver": isa_receiver,
-                        "gs_ctrl": gs_ctrl,
-                        "gs_version": gs_version,
-                        "st_ctrl": st_ctrl,
-                        "transaction_type": "837",
-                        "claim_id": _safe(claim.get("claim_id", "")),
-                        "variant": variant,
-                        "variant_indicator": variant_indicator,
-                        "clp_billed": _fmt_money(claim.get("clp_billed")),
-                        "total_svc_billed": _fmt_money(claim.get("total_svc_billed")),
-                        "total_svc_paid": _fmt_money(claim.get("total_svc_paid")),
-                        "service_line_count": _safe(len(claim.get("service_lines", []))),
-                        "has_discrepancy": str(claim.get("has_discrepancy", False)),
-                        "discrepancy_reason": _safe(claim.get("discrepancy_reason", "")),
-                        "billing_provider": billing_provider,
-                        "payer_name": payer,
-                        "submitter_name": submitter,
-                        "subscriber_name": subscriber,
-                        "patient_name": patient,
-                        "bht_id": bht_id,
-                        "bht_date": bht_date,
-                    }
+    for document, source_file, source_path in _iter_document_contexts(data):
+        for ic in document.get("interchanges", []):
+            ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
+            isa_sender = _safe(ic.get("isa06_sender", ""))
+            isa_receiver = _safe(ic.get("isa08_receiver", ""))
+            for fg in ic.get("functional_groups", []):
+                gs_ctrl = _safe(fg.get("header", {}).get("elements", {}).get("e6", ""))
+                gs_version = _safe(fg.get("header", {}).get("elements", {}).get("e8", ""))
+                for ts in fg.get("transactions", []):
+                    if ts.get("set_id") != "837":
+                        continue
+                    summary = ts.get("summary", {})
+                    st_ctrl = _safe(ts.get("header", {}).get("elements", {}).get("e2", ""))
+                    variant = _safe(summary.get("variant", ""))
+                    variant_indicator = _safe(summary.get("variant_indicator", ""))
+                    billing_provider = _safe(summary.get("billing_provider", ""))
+                    payer = _safe(summary.get("payer_name", ""))
+                    submitter = _safe(summary.get("submitter_name", ""))
+                    subscriber = _safe(summary.get("subscriber_name", ""))
+                    patient = _safe(summary.get("patient_name", ""))
+                    bht_id = _safe(summary.get("bht_id", ""))
+                    bht_date = _safe(summary.get("bht_date", ""))
+                    for claim in summary.get("claims", []):
+                        yield {
+                            "source_file": source_file,
+                            "source_path": source_path,
+                            "interchange_ctrl": ic_ctrl,
+                            "isa_sender": isa_sender,
+                            "isa_receiver": isa_receiver,
+                            "gs_ctrl": gs_ctrl,
+                            "gs_version": gs_version,
+                            "st_ctrl": st_ctrl,
+                            "transaction_type": "837",
+                            "claim_id": _safe(claim.get("claim_id", "")),
+                            "variant": variant,
+                            "variant_indicator": variant_indicator,
+                            "clp_billed": _fmt_money(claim.get("clp_billed")),
+                            "total_svc_billed": _fmt_money(claim.get("total_svc_billed")),
+                            "total_svc_paid": _fmt_money(claim.get("total_svc_paid")),
+                            "service_line_count": _safe(len(claim.get("service_lines", []))),
+                            "has_discrepancy": str(claim.get("has_discrepancy", False)),
+                            "discrepancy_reason": _safe(claim.get("discrepancy_reason", "")),
+                            "billing_provider": billing_provider,
+                            "payer_name": payer,
+                            "submitter_name": submitter,
+                            "subscriber_name": subscriber,
+                            "patient_name": patient,
+                            "bht_id": bht_id,
+                            "bht_date": bht_date,
+                        }
 
 
 def _walk_loops_for_svc(loops: list, set_id: str, ic_ctrl: str, isa_sender: str, gs_version: str, st_ctrl: str) -> Iterator[dict]:
@@ -222,16 +240,20 @@ def _walk_loops_for_svc(loops: list, set_id: str, ic_ctrl: str, isa_sender: str,
 
 def _build_service_line_records(data: dict) -> Iterator[dict]:
     """Yield service-line records from both 835 and 837 by walking loop sequences."""
-    for ic in data.get("interchanges", []):
-        ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
-        isa_sender = _safe(ic.get("isa06_sender", ""))
-        for fg in ic.get("functional_groups", []):
-            gs_version = _safe(fg.get("header", {}).get("elements", {}).get("e8", ""))
-            for ts in fg.get("transactions", []):
-                set_id = ts.get("set_id", "")
-                st_ctrl = _safe(ts.get("header", {}).get("elements", {}).get("e2", ""))
-                loops = ts.get("loops", [])
-                yield from _walk_loops_for_svc(loops, set_id, ic_ctrl, isa_sender, gs_version, st_ctrl)
+    for document, source_file, source_path in _iter_document_contexts(data):
+        for ic in document.get("interchanges", []):
+            ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
+            isa_sender = _safe(ic.get("isa06_sender", ""))
+            for fg in ic.get("functional_groups", []):
+                gs_version = _safe(fg.get("header", {}).get("elements", {}).get("e8", ""))
+                for ts in fg.get("transactions", []):
+                    set_id = ts.get("set_id", "")
+                    st_ctrl = _safe(ts.get("header", {}).get("elements", {}).get("e2", ""))
+                    loops = ts.get("loops", [])
+                    for rec in _walk_loops_for_svc(loops, set_id, ic_ctrl, isa_sender, gs_version, st_ctrl):
+                        rec["source_file"] = source_file
+                        rec["source_path"] = source_path
+                        yield rec
 
 
 def _build_entity_records(data: dict) -> Iterator[dict]:
@@ -269,7 +291,7 @@ def _build_entity_records(data: dict) -> Iterator[dict]:
     }
 
     def _emit(loop, elements, entity_code, ic_ctrl, isa_sender, isa_receiver,
-               gs_version, st_ctrl, set_id):
+               gs_version, st_ctrl, set_id, source_file, source_path):
         e1 = _safe(elements.get("e1", ""))
         e2 = _safe(elements.get("e2", ""))
         e3 = _safe(elements.get("e3", ""))
@@ -278,6 +300,8 @@ def _build_entity_records(data: dict) -> Iterator[dict]:
         e8 = _safe(elements.get("e8", ""))
         entity_type = entity_kind_map.get(entity_code, entity_code.lower())
         yield {
+            "source_file": source_file,
+            "source_path": source_path,
             "interchange_ctrl": ic_ctrl,
             "isa_sender": isa_sender,
             "isa_receiver": isa_receiver,
@@ -296,47 +320,45 @@ def _build_entity_records(data: dict) -> Iterator[dict]:
             "identification_code": e8,
         }
 
-    for ic in data.get("interchanges", []):
-        ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
-        isa_sender = _safe(ic.get("isa06_sender", ""))
-        isa_receiver = _safe(ic.get("isa08_receiver", ""))
-        for fg in ic.get("functional_groups", []):
-            gs_version = _safe(fg.get("header", {}).get("elements", {}).get("e8", ""))
-            for ts in fg.get("transactions", []):
-                set_id = ts.get("set_id", "")
-                st_ctrl = _safe(ts.get("header", {}).get("elements", {}).get("e2", ""))
-                for loop in ts.get("loops", []):
-                    leader_tag = loop.get("leader_tag", "")
-                    leader_code = loop.get("leader_code", "")
+    for document, source_file, source_path in _iter_document_contexts(data):
+        for ic in document.get("interchanges", []):
+            ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
+            isa_sender = _safe(ic.get("isa06_sender", ""))
+            isa_receiver = _safe(ic.get("isa08_receiver", ""))
+            for fg in ic.get("functional_groups", []):
+                gs_version = _safe(fg.get("header", {}).get("elements", {}).get("e8", ""))
+                for ts in fg.get("transactions", []):
+                    set_id = ts.get("set_id", "")
+                    st_ctrl = _safe(ts.get("header", {}).get("elements", {}).get("e2", ""))
+                    for loop in ts.get("loops", []):
+                        leader_tag = loop.get("leader_tag", "")
+                        leader_code = loop.get("leader_code", "")
 
-                    # NM1-led loops: extract from NM1 segment
-                    if leader_tag == "NM1":
-                        for seg in loop.get("segments", []):
-                            if seg.get("tag") == "NM1":
-                                yield from _emit(
-                                    loop, seg.get("elements", {}), leader_code,
-                                    ic_ctrl, isa_sender, isa_receiver,
-                                    gs_version, st_ctrl, set_id,
-                                )
-                                break
+                        if leader_tag == "NM1":
+                            for seg in loop.get("segments", []):
+                                if seg.get("tag") == "NM1":
+                                    yield from _emit(
+                                        loop, seg.get("elements", {}), leader_code,
+                                        ic_ctrl, isa_sender, isa_receiver,
+                                        gs_version, st_ctrl, set_id, source_file, source_path,
+                                    )
+                                    break
 
-                    # N1-led loops: payer (PR) and payee (PE) entities
-                    # N1 is both the loop leader and the entity segment
-                    elif leader_tag == "N1" and leader_code in ("PR", "PE"):
-                        for seg in loop.get("segments", []):
-                            if seg.get("tag") == "N1":
-                                yield from _emit(
-                                    loop, seg.get("elements", {}), leader_code,
-                                    ic_ctrl, isa_sender, isa_receiver,
-                                    gs_version, st_ctrl, set_id,
-                                )
-                                break
+                        elif leader_tag == "N1" and leader_code in ("PR", "PE"):
+                            for seg in loop.get("segments", []):
+                                if seg.get("tag") == "N1":
+                                    yield from _emit(
+                                        loop, seg.get("elements", {}), leader_code,
+                                        ic_ctrl, isa_sender, isa_receiver,
+                                        gs_version, st_ctrl, set_id, source_file, source_path,
+                                    )
+                                    break
 
 
 # ── CSV writer helpers ─────────────────────────────────────────────────────────
 
 CSV_CLAIMS_835_FIELDS = [
-    "interchange_ctrl", "isa_sender", "isa_receiver", "gs_ctrl", "gs_version",
+    "source_file", "source_path", "interchange_ctrl", "isa_sender", "isa_receiver", "gs_ctrl", "gs_version",
     "st_ctrl", "transaction_type", "claim_id", "status_code", "status_label",
     "status_category", "patient_name", "clp_billed", "clp_allowed", "clp_paid",
     "clp_adjustment", "svc_billed", "svc_paid", "service_line_count",
@@ -345,7 +367,7 @@ CSV_CLAIMS_835_FIELDS = [
 ]
 
 CSV_CLAIMS_837_FIELDS = [
-    "interchange_ctrl", "isa_sender", "isa_receiver", "gs_ctrl", "gs_version",
+    "source_file", "source_path", "interchange_ctrl", "isa_sender", "isa_receiver", "gs_ctrl", "gs_version",
     "st_ctrl", "transaction_type", "claim_id", "variant", "variant_indicator",
     "clp_billed", "total_svc_billed", "total_svc_paid", "service_line_count",
     "has_discrepancy", "discrepancy_reason", "billing_provider", "payer_name",
@@ -353,13 +375,13 @@ CSV_CLAIMS_837_FIELDS = [
 ]
 
 CSV_SVC_LINE_FIELDS = [
-    "interchange_ctrl", "isa_sender", "gs_version", "st_ctrl",
+    "source_file", "source_path", "interchange_ctrl", "isa_sender", "gs_version", "st_ctrl",
     "transaction_type", "claim_id", "line_number", "procedure_code",
     "billed", "paid",
 ]
 
 CSV_ENTITY_FIELDS = [
-    "interchange_ctrl", "isa_sender", "isa_receiver", "gs_version", "st_ctrl",
+    "source_file", "source_path", "interchange_ctrl", "isa_sender", "isa_receiver", "gs_version", "st_ctrl",
     "transaction_type", "loop_id", "loop_kind", "entity_code", "entity_type",
     "nm1_e1_entity_id", "nm1_e2_type_qualifier", "name_last_org",
     "name_first", "name_middle", "identification_code",
@@ -827,6 +849,46 @@ def write_csv(data: dict, output_dir: pathlib.Path) -> dict:
             w.writerow(rec)
     counts["entities.csv"] = sum(1 for _ in _build_entity_records(data))
 
+    documents = list(_iter_documents(data))
+    failures = data.get("failures", []) if data.get("batch") else []
+    batch_summary = {
+        "files_parsed": len(documents),
+        "files_failed": len(failures),
+        "transactions_total": sum(
+            len(fg.get("transactions", []))
+            for doc in documents
+            for ic in doc.get("interchanges", [])
+            for fg in ic.get("functional_groups", [])
+        ),
+        "claims_835_total": sum(
+            len(ts.get("summary", {}).get("claims", []))
+            for doc in documents
+            for ic in doc.get("interchanges", [])
+            for fg in ic.get("functional_groups", [])
+            for ts in fg.get("transactions", [])
+            if ts.get("set_id") == "835"
+        ),
+        "claims_837_total": sum(
+            len(ts.get("summary", {}).get("claims", []))
+            for doc in documents
+            for ic in doc.get("interchanges", [])
+            for fg in ic.get("functional_groups", [])
+            for ts in fg.get("transactions", [])
+            if ts.get("set_id") == "837"
+        ),
+    }
+    (output_dir / "batch_summary.json").write_text(
+        json.dumps(batch_summary, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    counts["batch_summary.json"] = batch_summary["files_parsed"]
+    if data.get("batch") and failures:
+        (output_dir / "parse_failures.json").write_text(
+            json.dumps(failures, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        counts["parse_failures.json"] = len(failures)
+
     return counts
 
 
@@ -850,83 +912,88 @@ def emit_ndjson(data: dict, file: Optional[TextIO] = None) -> int:
     count = 0
     out = file or sys.stdout
 
-    for ic in data.get("interchanges", []):
-        # Interchange-level record
-        ic_rec = {
-            "_record_type": "interchange",
-            "interchange_ctrl": _safe(ic.get("header", {}).get("elements", {}).get("e13", "")),
-            "isa_sender": _safe(ic.get("isa06_sender", "")),
-            "isa_receiver": _safe(ic.get("isa08_receiver", "")),
-            "isa_date": _safe(ic.get("header", {}).get("elements", {}).get("e9", "")),
-            "isa_time": _safe(ic.get("header", {}).get("elements", {}).get("e10", "")),
-            "gs_count": len(ic.get("functional_groups", [])),
-        }
-        out.write(json.dumps(ic_rec, ensure_ascii=False) + "\n")
-        count += 1
-
-        for fg in ic.get("functional_groups", []):
-            gs = fg.get("header", {})
-            # Functional group record
-            fg_rec = {
-                "_record_type": "functional_group",
+    for document, source_file, source_path in _iter_document_contexts(data):
+        for ic in document.get("interchanges", []):
+            # Interchange-level record
+            ic_rec = {
+                "_record_type": "interchange",
                 "interchange_ctrl": _safe(ic.get("header", {}).get("elements", {}).get("e13", "")),
-                "gs_ctrl": _safe(gs.get("elements", {}).get("e6", "")),
-                "gs_version": _safe(gs.get("elements", {}).get("e8", "")),
-                "gs_type": _safe(gs.get("elements", {}).get("e1", "")),
-                "gs_sender": _safe(gs.get("elements", {}).get("e2", "")),
-                "gs_receiver": _safe(gs.get("elements", {}).get("e3", "")),
-                "gs_date": _safe(gs.get("elements", {}).get("e4", "")),
-                "transaction_count": len(fg.get("transactions", [])),
+                "isa_sender": _safe(ic.get("isa06_sender", "")),
+                "isa_receiver": _safe(ic.get("isa08_receiver", "")),
+                "isa_date": _safe(ic.get("header", {}).get("elements", {}).get("e9", "")),
+                "isa_time": _safe(ic.get("header", {}).get("elements", {}).get("e10", "")),
+                "gs_count": len(ic.get("functional_groups", [])),
+                "source_file": source_file,
+                "source_path": source_path,
             }
-            out.write(json.dumps(fg_rec, ensure_ascii=False) + "\n")
+            out.write(json.dumps(ic_rec, ensure_ascii=False) + "\n")
             count += 1
 
-            for ts in fg.get("transactions", []):
-                st = ts.get("header", {})
-                set_id = _safe(ts.get("set_id", "?"))
-                # Transaction set record
-                ts_rec = {
-                    "_record_type": "transaction_set",
+            for fg in ic.get("functional_groups", []):
+                gs = fg.get("header", {})
+                # Functional group record
+                fg_rec = {
+                    "_record_type": "functional_group",
                     "interchange_ctrl": _safe(ic.get("header", {}).get("elements", {}).get("e13", "")),
                     "gs_ctrl": _safe(gs.get("elements", {}).get("e6", "")),
-                    "st_ctrl": _safe(st.get("elements", {}).get("e2", "")),
-                    "set_id": set_id,
-                    "summary": ts.get("summary", {}),
-                    "loop_count": len(ts.get("loops", [])),
+                    "gs_version": _safe(gs.get("elements", {}).get("e8", "")),
+                    "gs_type": _safe(gs.get("elements", {}).get("e1", "")),
+                    "gs_sender": _safe(gs.get("elements", {}).get("e2", "")),
+                    "gs_receiver": _safe(gs.get("elements", {}).get("e3", "")),
+                    "gs_date": _safe(gs.get("elements", {}).get("e4", "")),
+                    "transaction_count": len(fg.get("transactions", [])),
+                    "source_file": source_file,
+                    "source_path": source_path,
                 }
-                out.write(json.dumps(ts_rec, ensure_ascii=False) + "\n")
+                out.write(json.dumps(fg_rec, ensure_ascii=False) + "\n")
                 count += 1
 
-                for loop in ts.get("loops", []):
-                    # Loop record — compact representation
-                    seg_tags = [s.get("tag", "") for s in loop.get("segments", [])]
-                    first_nm1 = None
-                    for seg in loop.get("segments", []):
-                        if seg.get("tag") == "NM1":
-                            elements = seg.get("elements", {})
-                            first_nm1 = {
-                                "entity_code": _safe(loop.get("leader_code", "")),
-                                "name_last_org": _safe(elements.get("e3", "")),
-                                "name_first": _safe(elements.get("e4", "")),
-                                "id_code": _safe(elements.get("e8", "")),
-                            }
-                            break
-                    loop_rec = {
-                        "_record_type": "loop",
+                for ts in fg.get("transactions", []):
+                    st = ts.get("header", {})
+                    set_id = _safe(ts.get("set_id", "?"))
+                    # Transaction set record
+                    ts_rec = {
+                        "_record_type": "transaction_set",
                         "interchange_ctrl": _safe(ic.get("header", {}).get("elements", {}).get("e13", "")),
+                        "gs_ctrl": _safe(gs.get("elements", {}).get("e6", "")),
                         "st_ctrl": _safe(st.get("elements", {}).get("e2", "")),
                         "set_id": set_id,
-                        "loop_id": _safe(loop.get("id", "")),
-                        "loop_kind": _safe(loop.get("kind", "")),
-                        "leader_tag": _safe(loop.get("leader_tag", "")),
-                        "leader_code": _safe(loop.get("leader_code", "")),
-                        "description": _safe(loop.get("description", "")),
-                        "segment_count": len(loop.get("segments", [])),
-                        "segment_tags": seg_tags,
-                        "nm1": first_nm1,
+                        "summary": ts.get("summary", {}),
+                        "loop_count": len(ts.get("loops", [])),
                     }
-                    out.write(json.dumps(loop_rec, ensure_ascii=False) + "\n")
+                    out.write(json.dumps(ts_rec, ensure_ascii=False) + "\n")
                     count += 1
+
+                    for loop in ts.get("loops", []):
+                        # Loop record — compact representation
+                        seg_tags = [s.get("tag", "") for s in loop.get("segments", [])]
+                        first_nm1 = None
+                        for seg in loop.get("segments", []):
+                            if seg.get("tag") == "NM1":
+                                elements = seg.get("elements", {})
+                                first_nm1 = {
+                                    "entity_code": _safe(loop.get("leader_code", "")),
+                                    "name_last_org": _safe(elements.get("e3", "")),
+                                    "name_first": _safe(elements.get("e4", "")),
+                                    "id_code": _safe(elements.get("e8", "")),
+                                }
+                                break
+                        loop_rec = {
+                            "_record_type": "loop",
+                            "interchange_ctrl": _safe(ic.get("header", {}).get("elements", {}).get("e13", "")),
+                            "st_ctrl": _safe(st.get("elements", {}).get("e2", "")),
+                            "set_id": set_id,
+                            "loop_id": _safe(loop.get("id", "")),
+                            "loop_kind": _safe(loop.get("kind", "")),
+                            "leader_tag": _safe(loop.get("leader_tag", "")),
+                            "leader_code": _safe(loop.get("leader_code", "")),
+                            "description": _safe(loop.get("description", "")),
+                            "segment_count": len(loop.get("segments", [])),
+                            "segment_tags": seg_tags,
+                            "nm1": first_nm1,
+                        }
+                        out.write(json.dumps(loop_rec, ensure_ascii=False) + "\n")
+                        count += 1
 
     return count
 
@@ -946,6 +1013,8 @@ SQLITE_SCHEMA = """\
 -- interchanges (one row per ISA envelope)
 CREATE TABLE IF NOT EXISTS interchanges (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_file TEXT,
+    source_path TEXT,
     interchange_ctrl TEXT,
     isa_sender TEXT,
     isa_receiver TEXT,
@@ -957,6 +1026,8 @@ CREATE TABLE IF NOT EXISTS interchanges (
 -- functional_groups (one row per GS envelope)
 CREATE TABLE IF NOT EXISTS functional_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_file TEXT,
+    source_path TEXT,
     interchange_ctrl TEXT,
     gs_ctrl TEXT,
     gs_type TEXT,
@@ -970,6 +1041,8 @@ CREATE TABLE IF NOT EXISTS functional_groups (
 -- transactions (one row per ST/SE transaction set)
 CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_file TEXT,
+    source_path TEXT,
     interchange_ctrl TEXT,
     gs_ctrl TEXT,
     st_ctrl TEXT,
@@ -986,6 +1059,8 @@ CREATE TABLE IF NOT EXISTS transactions (
 -- claims_835 (one row per CLP loop from 835 transactions)
 CREATE TABLE IF NOT EXISTS claims_835 (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_file TEXT,
+    source_path TEXT,
     interchange_ctrl TEXT,
     isa_sender TEXT,
     isa_receiver TEXT,
@@ -1018,6 +1093,8 @@ CREATE TABLE IF NOT EXISTS claims_835 (
 -- claims_837 (one row per CLM loop from 837 transactions)
 CREATE TABLE IF NOT EXISTS claims_837 (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_file TEXT,
+    source_path TEXT,
     interchange_ctrl TEXT,
     isa_sender TEXT,
     isa_receiver TEXT,
@@ -1046,6 +1123,8 @@ CREATE TABLE IF NOT EXISTS claims_837 (
 -- service_lines (one row per service line from both 835 and 837)
 CREATE TABLE IF NOT EXISTS service_lines (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_file TEXT,
+    source_path TEXT,
     interchange_ctrl TEXT,
     isa_sender TEXT,
     gs_version TEXT,
@@ -1061,6 +1140,8 @@ CREATE TABLE IF NOT EXISTS service_lines (
 -- entities (one row per NM1 loop from both 835 and 837)
 CREATE TABLE IF NOT EXISTS entities (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_file TEXT,
+    source_path TEXT,
     interchange_ctrl TEXT,
     isa_sender TEXT,
     isa_receiver TEXT,
@@ -1107,92 +1188,99 @@ def write_sqlite_bundle(data: dict, output_dir: pathlib.Path) -> dict:
     counts = {}
 
     # Interchanges
-    ic_fields = ["interchange_ctrl", "isa_sender", "isa_receiver", "isa_date", "isa_time", "gs_count"]
+    ic_fields = ["source_file", "source_path", "interchange_ctrl", "isa_sender", "isa_receiver", "isa_date", "isa_time", "gs_count"]
     ic_path = output_dir / "interchanges.csv"
+    ic_count = 0
     with open(ic_path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=ic_fields)
         w.writeheader()
-        for ic in data.get("interchanges", []):
-            ic_header = ic.get("header", {})
-            elements = ic_header.get("elements", {})
-            isa_date = elements.get("e9", "")
-            isa_time = elements.get("e10", "")
-            # Fix time format (HHMM → HH:MM:SS if 4 digits)
-            if len(str(isa_time)) >= 4:
-                try:
-                    hh, mm = isa_time[:2], isa_time[2:4]
-                    isa_time = f"{hh}:{mm}:00"
-                except (ValueError, TypeError):
-                    pass
-            row = {
-                "interchange_ctrl": _safe(elements.get("e13", "")),
-                "isa_sender": _safe(ic.get("isa06_sender", "")),
-                "isa_receiver": _safe(ic.get("isa08_receiver", "")),
-                "isa_date": _fmt_isa_date(isa_date),
-                "isa_time": _safe(isa_time),
-                "gs_count": str(len(ic.get("functional_groups", []))),
-            }
-            w.writerow(row)
-    counts["interchanges.csv"] = sum(1 for _ in data.get("interchanges", []))
+        for document, source_file, source_path in _iter_document_contexts(data):
+            for ic in document.get("interchanges", []):
+                ic_header = ic.get("header", {})
+                elements = ic_header.get("elements", {})
+                isa_date = elements.get("e9", "")
+                isa_time = elements.get("e10", "")
+                if len(str(isa_time)) >= 4:
+                    try:
+                        hh, mm = isa_time[:2], isa_time[2:4]
+                        isa_time = f"{hh}:{mm}:00"
+                    except (ValueError, TypeError):
+                        pass
+                row = {
+                    "source_file": source_file,
+                    "source_path": source_path,
+                    "interchange_ctrl": _safe(elements.get("e13", "")),
+                    "isa_sender": _safe(ic.get("isa06_sender", "")),
+                    "isa_receiver": _safe(ic.get("isa08_receiver", "")),
+                    "isa_date": _fmt_isa_date(isa_date),
+                    "isa_time": _safe(isa_time),
+                    "gs_count": str(len(ic.get("functional_groups", []))),
+                }
+                w.writerow(row)
+                ic_count += 1
+    counts["interchanges.csv"] = ic_count
 
     # Functional groups
-    fg_fields = ["interchange_ctrl", "gs_ctrl", "gs_type", "gs_sender", "gs_receiver", "gs_date", "gs_version", "transaction_count"]
+    fg_fields = ["source_file", "source_path", "interchange_ctrl", "gs_ctrl", "gs_type", "gs_sender", "gs_receiver", "gs_date", "gs_version", "transaction_count"]
     fg_path = output_dir / "functional_groups.csv"
     fg_count = 0
     with open(fg_path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fg_fields)
         w.writeheader()
-        for ic in data.get("interchanges", []):
-            ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
-            for fg in ic.get("functional_groups", []):
-                gs = fg.get("header", {})
-                gs_elements = gs.get("elements", {})
-                row = {
-                    "interchange_ctrl": ic_ctrl,
-                    "gs_ctrl": _safe(gs_elements.get("e6", "")),
-                    "gs_type": _safe(gs_elements.get("e1", "")),
-                    "gs_sender": _safe(gs_elements.get("e2", "")),
-                    "gs_receiver": _safe(gs_elements.get("e3", "")),
-                    "gs_date": _fmt_gs_date(_safe(gs_elements.get("e4", ""))),
-                    "gs_version": _safe(gs_elements.get("e8", "")),
-                    "transaction_count": str(len(fg.get("transactions", []))),
-                }
-                w.writerow(row)
-                fg_count += 1
+        for document, source_file, source_path in _iter_document_contexts(data):
+            for ic in document.get("interchanges", []):
+                ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
+                for fg in ic.get("functional_groups", []):
+                    gs = fg.get("header", {})
+                    gs_elements = gs.get("elements", {})
+                    row = {
+                        "source_file": source_file,
+                        "source_path": source_path,
+                        "interchange_ctrl": ic_ctrl,
+                        "gs_ctrl": _safe(gs_elements.get("e6", "")),
+                        "gs_type": _safe(gs_elements.get("e1", "")),
+                        "gs_sender": _safe(gs_elements.get("e2", "")),
+                        "gs_receiver": _safe(gs_elements.get("e3", "")),
+                        "gs_date": _fmt_gs_date(_safe(gs_elements.get("e4", ""))),
+                        "gs_version": _safe(gs_elements.get("e8", "")),
+                        "transaction_count": str(len(fg.get("transactions", []))),
+                    }
+                    w.writerow(row)
+                    fg_count += 1
     counts["functional_groups.csv"] = fg_count
 
     # Transactions
-    ts_fields = ["interchange_ctrl", "gs_ctrl", "st_ctrl", "set_id", "payment_amount",
+    ts_fields = ["source_file", "source_path", "interchange_ctrl", "gs_ctrl", "st_ctrl", "set_id", "payment_amount",
                  "total_billed_amount", "total_paid_amount", "claim_count", "loop_count", "summary_json"]
     ts_path = output_dir / "transactions.csv"
     ts_count = 0
     with open(ts_path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=ts_fields)
         w.writeheader()
-        for ic in data.get("interchanges", []):
-            ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
-            for fg in ic.get("functional_groups", []):
-                gs_ctrl = _safe(fg.get("header", {}).get("elements", {}).get("e6", ""))
-                for ts in fg.get("transactions", []):
-                    st = ts.get("header", {})
-                    summary = ts.get("summary", {})
-                    row = {
-                        "interchange_ctrl": ic_ctrl,
-                        "gs_ctrl": gs_ctrl,
-                        "st_ctrl": _safe(st.get("elements", {}).get("e2", "")),
-                        "set_id": _safe(ts.get("set_id", "")),
-                        "payment_amount": _fmt_money(summary.get("payment_amount")),
-                        "total_billed_amount": _fmt_money(summary.get("total_billed_amount")),
-                        "total_paid_amount": _fmt_money(summary.get("total_paid_amount")),
-                        "claim_count": _safe(summary.get("claim_count", "")),
-                        "loop_count": _safe(summary.get("loop_count", "")),
-                        "summary_json": "",  # populated below
-                    }
-                    # Write with summary JSON
-                    summary_copy = {k: v for k, v in row.items()}
-                    summary_copy["summary_json"] = json.dumps(summary, ensure_ascii=False)
-                    w.writerow(summary_copy)
-                    ts_count += 1
+        for document, source_file, source_path in _iter_document_contexts(data):
+            for ic in document.get("interchanges", []):
+                ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
+                for fg in ic.get("functional_groups", []):
+                    gs_ctrl = _safe(fg.get("header", {}).get("elements", {}).get("e6", ""))
+                    for ts in fg.get("transactions", []):
+                        st = ts.get("header", {})
+                        summary = ts.get("summary", {})
+                        row = {
+                            "source_file": source_file,
+                            "source_path": source_path,
+                            "interchange_ctrl": ic_ctrl,
+                            "gs_ctrl": gs_ctrl,
+                            "st_ctrl": _safe(st.get("elements", {}).get("e2", "")),
+                            "set_id": _safe(ts.get("set_id", "")),
+                            "payment_amount": _fmt_money(summary.get("payment_amount")),
+                            "total_billed_amount": _fmt_money(summary.get("total_billed_amount")),
+                            "total_paid_amount": _fmt_money(summary.get("total_paid_amount")),
+                            "claim_count": _safe(summary.get("claim_count", "")),
+                            "loop_count": _safe(summary.get("loop_count", "")),
+                            "summary_json": json.dumps(summary, ensure_ascii=False),
+                        }
+                        w.writerow(row)
+                        ts_count += 1
     counts["transactions.csv"] = ts_count
 
     # 835 claims (overwrite with full fields from the helper)

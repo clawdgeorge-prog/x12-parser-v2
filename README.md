@@ -134,6 +134,12 @@ Six output formats are available via `--format`:
   - `service_lines.csv` — one row per SVC/SV1/SV2 service line
   - `entities.csv` — one row per NM1 or N1 entity (payer, provider, patient)
 
+When the CLI input is a directory, these CSV files aggregate rows from every parsed file in that directory. Batch exports also include:
+  - `batch_summary.json` — parsed-file and claim/transaction totals for the batch
+  - `parse_failures.json` — only written if one or more files fail to parse
+
+Batch CSV and SQLite row outputs now include `source_file` and `source_path` columns so downstream users can trace each row back to its originating file.
+
 **`sqlite`** — a normalized SQLite-ready export bundle. Writes all CSV files above plus three additional envelope-level CSVs (`interchanges.csv`, `functional_groups.csv`, `transactions.csv`), a `schema.sql` with `CREATE TABLE` statements, and an `IMPORT_GUIDE.txt` with copy-pasteable SQLite import commands.
 
 **`analytics`** — an analytics-oriented CSV bundle. Writes enriched 835 and 837 claim fact tables, a claim-level 835 reconciliation extract, and analytics-friendly service-line rows. It also emits:
@@ -171,8 +177,14 @@ python3 -m src.cli tests/fixtures/sample_835.edi --format ndjson
 # CSV — flat CSV files per record type (claims, service lines, entities)
 python3 -m src.cli tests/fixtures/sample_835.edi --format csv -o extracts/
 
+# CSV batch export from a directory
+python3 -m src.cli tests/fixtures/ --format csv -o extracts/
+
 # SQLite bundle — normalized CSVs + schema.sql ready for database import
 python3 -m src.cli tests/fixtures/sample_835.edi --format sqlite -o db_export/
+
+# SQLite batch export from a directory
+python3 -m src.cli tests/fixtures/ --format sqlite -o db_export/
 
 # Analytics bundle — enriched claim facts + reconciliation-oriented extracts
 python3 -m src.cli tests/fixtures/sample_835_rich.edi --format analytics -o analytics/
