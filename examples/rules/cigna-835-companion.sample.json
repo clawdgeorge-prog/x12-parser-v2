@@ -1,0 +1,56 @@
+{
+  "name": "Cigna 835 Remittance Companion Guide Rules",
+  "description": "Sample rule pack encoding common Cigna 835 remittance expectations based on publicly documented X12 companion guide patterns. Not an official Cigna publication. Verify against current Cigna trading partner documentation before production use.",
+  "match": {
+    "transaction_set": "835",
+    "version": "005010X221A1",
+    "payer_name_contains": "CIGNA"
+  },
+  "rules": [
+    {
+      "id": "cigna-835-trn-required",
+      "segment": "TRN",
+      "presence": "required",
+      "severity": "error",
+      "message": "TRN segment is required on all Cigna 835 transactions for payment trace and reconciliation."
+    },
+    {
+      "id": "cigna-835-ref-tj-recommended",
+      "segment": "REF",
+      "where": { "e1": "TJ" },
+      "presence": "recommended",
+      "severity": "warning",
+      "message": "Cigna commonly includes REF*TJ (Provider Tax ID / EIN) on 835 remittance for provider identification in payment reporting."
+    },
+    {
+      "id": "cigna-835-n1-payee-required",
+      "segment": "N1",
+      "where": { "e1": "PE" },
+      "presence": "required",
+      "severity": "error",
+      "message": "Payee N1 (entity code PE) is required. Cigna companion flows rely on explicit payee identification for ERA enrollment and payment routing."
+    },
+    {
+      "id": "cigna-835-n1-payer-required",
+      "segment": "N1",
+      "where": { "e1": "PR" },
+      "presence": "required",
+      "severity": "error",
+      "message": "Payer N1 (entity code PR) is required on every 835."
+    },
+    {
+      "id": "cigna-835-dtm-recommended",
+      "segment": "DTM",
+      "presence": "recommended",
+      "severity": "warning",
+      "message": "DTM date information is recommended for Cigna 835 files to support reconciliation timestamps and audit trails."
+    },
+    {
+      "id": "cigna-835-cas-adjustment-codes",
+      "segment": "CAS",
+      "presence": "recommended",
+      "severity": "warning",
+      "message": "CAS adjustment groups and codes should align with standard ASC X12 reason codes. Cigna uses CAS to communicate contractual adjustments and bundling decisions."
+    }
+  ]
+}

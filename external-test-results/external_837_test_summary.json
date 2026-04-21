@@ -1,0 +1,34 @@
+[
+  {
+    "file": "hdi_837p_all_fields.dat",
+    "size_bytes": 4170,
+    "parse_json_code": 0,
+    "parse_json_stdout_head": "{\n  \"version\": \"0.1.0\",\n  \"interchanges\": [\n    {\n      \"header\": {\n        \"tag\": \"ISA\",\n        \"elements\": {\n          \"e1\": \"00\",\n          \"e2\": \"          \",\n          \"e3\": \"00\",\n          \"e4\": \"          \",\n          \"e5\": \"ZZ\",\n          \"e6\": \"123456789012345\",\n          \"e7\": \"ZZ\",\n          \"e8\": \"123456789012346\",\n          \"e9\": \"061015\",\n          \"e10\": \"1705\",\n          \"e11\": \">\",\n          \"e12\": \"00501\",\n          \"e13\": \"000010216\",\n          \"e14\": \"0\",\n          \"e15\": \"T\",\n          \"e16\": \":\"\n        },\n        \"raw\": \"ISA*00*          *00*          *ZZ*12345678901234",
+    "parse_json_stderr_head": "",
+    "summary_code": 0,
+    "summary_stdout_head": "========================================================\nINTERCHANGE 1\n========================================================\n  Sender:     123456789012345\n  Receiver:   123456789012346\n\n  Functional Group 1  [version: 005010X222A2]\n\n  Transaction 1: 837  [ST control: 0031]\n    Variant:     P (Professional)\n    Billed:      $100.00\n    Claims:      1\n    Service lines: 4\n    HL levels:   3\n    Billing provider: DOE JANE\n    Payer:       KEY INSURANCE COMPANY\n    BHT ID:      0031\n    BHT date:    20061015\n\n    HL hierarchy:\n      HL@1 level=20 role=billing_provider\n      HL@2 level=22 role=s",
+    "summary_stderr_head": "",
+    "validate_code": 0,
+    "validate_stdout_head": "{\n  \"clean\": true,\n  \"issue_count\": 13,\n  \"error_count\": 0,\n  \"warning_count\": 13,\n  \"issues\": [\n    {\n      \"severity\": \"warning\",\n      \"code\": \"UNKNOWN_SEGMENT\",\n      \"category\": \"content\",\n      \"message\": \"Unknown segment tag 'PRV' at position 9; may indicate a typo or unsupported transaction type\",\n      \"segment_tag\": \"PRV\",\n      \"segment_position\": 9,\n      \"recommendation\": \"An unrecognized segment tag was encountered. This may be a typo, an unsupported optional segment, or an unsupported transaction type. Verify the transaction set version and type.\"\n    },\n    {\n      \"severity\": ",
+    "validate_stderr_head": "",
+    "ndjson_code": 0,
+    "ndjson_stdout_head": "{\"_record_type\": \"interchange\", \"interchange_ctrl\": \"000010216\", \"isa_sender\": \"123456789012345\", \"isa_receiver\": \"123456789012346\", \"isa_date\": \"061015\", \"isa_time\": \"1705\", \"gs_count\": 1}\n{\"_record_type\": \"functional_group\", \"interchange_ctrl\": \"000010216\", \"gs_ctrl\": \"20213\", \"gs_version\": \"005010X222A2\", \"gs_type\": \"HC\", \"gs_sender\": \"1234567890\", \"gs_receiver\": \"9876543210\", \"gs_date\": \"20061015\", \"transaction_count\": 1}\n{\"_record_type\": \"transaction_set\", \"interchange_ctrl\": \"000010216\", \"gs_ctrl\": \"20213\", \"st_ctrl\": \"0031\", \"set_id\": \"837\", \"summary\": {\"set_id\": \"837\", \"segment_count\":",
+    "ndjson_stderr_head": ""
+  },
+  {
+    "file": "hdi_837i_all_fields.dat",
+    "size_bytes": 5505,
+    "parse_json_code": 0,
+    "parse_json_stdout_head": "{\n  \"version\": \"0.1.0\",\n  \"interchanges\": [\n    {\n      \"header\": {\n        \"tag\": \"ISA\",\n        \"elements\": {\n          \"e1\": \"00\",\n          \"e2\": \"          \",\n          \"e3\": \"00\",\n          \"e4\": \"          \",\n          \"e5\": \"ZZ\",\n          \"e6\": \"133052274      \",\n          \"e7\": \"ZZ\",\n          \"e8\": \"121150001      \",\n          \"e9\": \"190311\",\n          \"e10\": \"1700\",\n          \"e11\": \"$\",\n          \"e12\": \"00501\",\n          \"e13\": \"000000002\",\n          \"e14\": \"0\",\n          \"e15\": \"T\",\n          \"e16\": \":\"\n        },\n        \"raw\": \"ISA*00*          *00*          *ZZ*133052274     ",
+    "parse_json_stderr_head": "",
+    "summary_code": 0,
+    "summary_stdout_head": "========================================================\nINTERCHANGE 1\n========================================================\n  Sender:     133052274\n  Receiver:   121150001\n\n  Functional Group 1  [version: 005010X222A1]\n\n  Transaction 1: 837  [ST control: 00000024]\n    Variant:     I (Institutional)\n    Billed:      $89.93\n    Claims:      1\n    Service lines: 2\n    HL levels:   3\n    Billing provider: DOE JANE\n    Payer:       BEST PLAN SERVICE\n    BHT ID:      00000024\n    BHT date:    20190311\n\n    HL hierarchy:\n      HL@1 level=20 role=billing_provider\n      HL@2 level=22 role=subscribe",
+    "summary_stderr_head": "",
+    "validate_code": 1,
+    "validate_stdout_head": "{\n  \"clean\": false,\n  \"issue_count\": 13,\n  \"error_count\": 1,\n  \"warning_count\": 12,\n  \"issues\": [\n    {\n      \"severity\": \"warning\",\n      \"code\": \"UNKNOWN_SEGMENT\",\n      \"category\": \"content\",\n      \"message\": \"Unknown segment tag 'PRV' at position 9; may indicate a typo or unsupported transaction type\",\n      \"segment_tag\": \"PRV\",\n      \"segment_position\": 9,\n      \"recommendation\": \"An unrecognized segment tag was encountered. This may be a typo, an unsupported optional segment, or an unsupported transaction type. Verify the transaction set version and type.\"\n    },\n    {\n      \"severity\":",
+    "validate_stderr_head": "",
+    "ndjson_code": 0,
+    "ndjson_stdout_head": "{\"_record_type\": \"interchange\", \"interchange_ctrl\": \"000000002\", \"isa_sender\": \"133052274\", \"isa_receiver\": \"121150001\", \"isa_date\": \"190311\", \"isa_time\": \"1700\", \"gs_count\": 1}\n{\"_record_type\": \"functional_group\", \"interchange_ctrl\": \"000000002\", \"gs_ctrl\": \"02\", \"gs_version\": \"005010X222A1\", \"gs_type\": \"HC\", \"gs_sender\": \"133052274\", \"gs_receiver\": \"121150001\", \"gs_date\": \"20190311\", \"transaction_count\": 1}\n{\"_record_type\": \"transaction_set\", \"interchange_ctrl\": \"000000002\", \"gs_ctrl\": \"02\", \"st_ctrl\": \"00000024\", \"set_id\": \"837\", \"summary\": {\"set_id\": \"837\", \"segment_count\": 144, \"loop_coun",
+    "ndjson_stderr_head": ""
+  }
+]

@@ -1,0 +1,69 @@
+{
+  "name": "Medicaid 837 Institutional Claim Companion Guide Rules",
+  "description": "Sample rule pack encoding common Medicaid 837 Institutional (837I) expectations based on publicly documented X12 companion guide patterns and CMS guidelines. Not an official Medicaid publication. Medicaid requirements vary significantly by state — verify with your state's MMIS trading partner documentation before production use.",
+  "match": {
+    "transaction_set": "837",
+    "version": "005010X223A1",
+    "payer_name_contains": "MEDICAID"
+  },
+  "rules": [
+    {
+      "id": "medicaid-837i-hi-required",
+      "segment": "HI",
+      "presence": "required",
+      "severity": "error",
+      "message": "HI (Diagnosis) segment is required for all Medicaid 837I institutional claims. Many state Medicaid programs require ICD-10 diagnosis codes."
+    },
+    {
+      "id": "medicaid-837i-cl1-required",
+      "segment": "CL1",
+      "presence": "required",
+      "severity": "error",
+      "message": "CL1 (Institutional Claim) segment is required for 837I Medicaid claims. Must include admission type code, admission source code, and patient status code."
+    },
+    {
+      "id": "medicaid-837i-drg-required-inpatient",
+      "segment": "HI",
+      "presence": "required",
+      "severity": "warning",
+      "message": "State Medicaid programs typically require DRG coding for inpatient hospital claims. Check your state's specific DRG version requirements (e.g., CMS-DRG, APR-DRG, MSD-DRG)."
+    },
+    {
+      "id": "medicaid-837i-pwk-for-attachments",
+      "segment": "PWK",
+      "presence": "recommended",
+      "severity": "warning",
+      "message": "PWK (Paperwork/Attachment) segment is recommended when supporting documentation is required. Many state Medicaid programs require PWK for specific claim types (DME, home health, etc.)."
+    },
+    {
+      "id": "medicaid-837i-nm1-billing-npi-required",
+      "segment": "NM1",
+      "where": { "e1": "85" },
+      "presence": "required",
+      "severity": "error",
+      "message": "Billing Provider NM1 (entity code 85) with NPI in NM109 is required for all Medicaid 837 submissions per CMS requirements."
+    },
+    {
+      "id": "medicaid-837i-txref-state-submitter-id",
+      "segment": "REF",
+      "where": { "e1": "TJ" },
+      "presence": "recommended",
+      "severity": "warning",
+      "message": "Many state Medicaid programs require REF*TJ (Submitter ID / Tax ID) in addition to NPI for enrollment and billing identification."
+    },
+    {
+      "id": "medicaid-837i-oi-insurance-recommended",
+      "segment": "OI",
+      "presence": "recommended",
+      "severity": "warning",
+      "message": "OI (Other Insurance) segment is recommended for Medicaid claims to document coordination of benefits information required by state MMIS systems."
+    },
+    {
+      "id": "medicaid-837i-clm-required",
+      "segment": "CLM",
+      "presence": "required",
+      "severity": "error",
+      "message": "CLM claim information is required for Medicaid institutional adjudication and should remain internally consistent with claim frequency, bill type, and total charge fields."
+    }
+  ]
+}

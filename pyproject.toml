@@ -1,0 +1,36 @@
+[project]
+name = "x12-parser"
+version = "0.2.1"
+description = "X12 parser for healthcare EDI 835 and 837 transactions"
+requires-python = ">=3.9"
+dependencies = []
+
+homepage = "https://github.com/georgeclawd/x12-parser"
+readme = "README.md"
+license = "MIT"
+authors = [
+    { name = "x12-parser contributors" }
+]
+keywords = ["x12", "edi", "835", "837", "healthcare", "claims", "remittance"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Healthcare Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Financial Software",
+]
+
+[project.scripts]
+x12-parse = "src.cli:main"
+x12-validate = "src.validate:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+parquet = ["pandas>=2", "pyarrow>=15"]

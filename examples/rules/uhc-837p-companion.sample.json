@@ -1,0 +1,65 @@
+{
+  "name": "UnitedHealthcare 837 Professional Claim Companion Guide Rules",
+  "description": "Sample rule pack encoding common UnitedHealthcare 837 Professional (837P) expectations based on publicly documented X12 companion guide patterns. Not an official UHC publication. Verify against current UHC OptumInsight trading partner documentation before production use.",
+  "match": {
+    "transaction_set": "837",
+    "version": "005010X222A1",
+    "payer_name_contains": "UNITED"
+  },
+  "rules": [
+    {
+      "id": "uhc-837p-hc-rendering-npi-required",
+      "segment": "NM1",
+      "where": { "e1": "82" },
+      "presence": "required",
+      "severity": "error",
+      "message": "Rendering Provider NM1 (entity code 82) is required. UHC requires NPI in NM109 for all 837P submissions."
+    },
+    {
+      "id": "uhc-837p-nm1-billing-provider-required",
+      "segment": "NM1",
+      "where": { "e1": "85" },
+      "presence": "required",
+      "severity": "error",
+      "message": "Billing Provider NM1 (entity code 85) is required. UHC requires this for claims processing and payment routing."
+    },
+    {
+      "id": "uhc-837p-prv-rendering-recommended",
+      "segment": "PRV",
+      "where": { "e1": "PE" },
+      "presence": "recommended",
+      "severity": "warning",
+      "message": "PRV*PE (Rendering Provider Specialty) is recommended for UHC 837P when the rendering provider's taxonomy requires it for correct claim adjudication."
+    },
+    {
+      "id": "uhc-837p-dtp-472-recommended",
+      "segment": "DTP",
+      "where": { "e1": "472" },
+      "presence": "recommended",
+      "severity": "warning",
+      "message": "DTP*472 (Service Date) is recommended for each service line on UHC 837P. Required for accurate adjudication and bundling logic."
+    },
+    {
+      "id": "uhc-837p-ref-g1-recommended",
+      "segment": "REF",
+      "where": { "e1": "G1" },
+      "presence": "recommended",
+      "severity": "warning",
+      "message": "UHC commonly uses REF*G1 (Prior Authorization Reference) on specialist and facility referrals. Include when applicable."
+    },
+    {
+      "id": "uhc-837p-cmt-segment-optional",
+      "segment": "CMT",
+      "presence": "forbidden",
+      "severity": "warning",
+      "message": "CMT (Comment) segment is not used in UHC 837P submission context. Claims-level notes should use the NTE segment instead."
+    },
+    {
+      "id": "uhc-837p-claim-segment-required",
+      "segment": "CLM",
+      "presence": "required",
+      "severity": "warning",
+      "message": "CLM claim information is required on every UHC 837P submission and should remain internally consistent with service-line charges."
+    }
+  ]
+}

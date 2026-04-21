@@ -1,0 +1,27 @@
+{
+  "name": "Premier Insurance 835 companion sample",
+  "description": "Example-only sample showing how to encode a small payer-specific 835 rule pack. Not an official companion guide.",
+  "match": {
+    "transaction_set": "835",
+    "version": "005010X221A1",
+    "payer_name_contains": "PREMIER INSURANCE"
+  },
+  "rules": [
+    {
+      "id": "premier-835-ref-eob-recommended",
+      "segment": "REF",
+      "where": { "e1": "EOB" },
+      "presence": "recommended",
+      "severity": "warning",
+      "message": "Premier sample rule: REF*EOB is recommended for downstream remittance tracing."
+    },
+    {
+      "id": "premier-835-trn-prefix",
+      "segment": "TRN",
+      "element": "e2",
+      "starts_with": "A",
+      "severity": "warning",
+      "message": "Premier sample rule: TRN02 is expected to start with A in this intentionally demonstrative companion-pack example."
+    }
+  ]
+}

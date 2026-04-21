@@ -1,0 +1,1 @@
+interchange_ctrl,isa_sender,isa_receiver,gs_ctrl,gs_version,st_ctrl,transaction_type,claim_id,variant,variant_indicator,clp_billed,total_svc_billed,total_svc_paid,service_line_count,has_discrepancy,discrepancy_reason,billing_provider,payer_name,submitter_name,subscriber_name,patient_name,bht_id,bht_date

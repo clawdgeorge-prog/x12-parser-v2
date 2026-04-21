@@ -1,0 +1,12 @@
+file,size_bytes,claim_markers,service_markers,parse_json_code,summary_code,validate_json_code,ndjson_code,validate_clean,validate_issue_count,validate_error_count,validate_warning_count,validate_codes
+hdi_835_all_fields.dat,2115,1,7,0,0,1,0,False,3,1,2,BPR_CLP_SUM_MISMATCH;CLP_STATUS_OUT_OF_RANGE;SE_COUNT_MISMATCH
+hdi_835_denial.dat,856,1,1,0,0,0,0,True,1,0,1,CLP_STATUS_OUT_OF_RANGE
+hdi_835_not_covered_inpatient.dat,869,1,0,0,0,1,0,False,3,1,2,CLAIM_WITHOUT_SERVICE_LINES;CLP_STATUS_OUT_OF_RANGE;SE_COUNT_MISMATCH
+hdi_835_provider_level_adjustment.dat,1862,1,1,0,0,1,0,False,5,4,1,CLP_STATUS_OUT_OF_RANGE;REQUIRED_SEGMENT_MISSING;SE_COUNT_MISMATCH
+hdi_837_commercial.dat,997,1,3,0,0,1,0,False,2,2,0,ISA_IEA_MISMATCH;ORPHAN_ST
+hdi_837_multi_tran.dat,2528,3,7,0,0,1,0,False,3,3,0,ORPHAN_ST
+hdi_837_prof_encounter.dat,1069,1,4,0,0,1,0,False,2,2,0,ISA_IEA_MISMATCH;ORPHAN_ST
+hdi_837i_all_fields.dat,5505,1,2,0,0,1,0,False,1,1,0,SE_COUNT_MISMATCH
+hdi_837i_inst_claim.dat,1059,1,2,0,0,1,0,False,1,1,0,ORPHAN_ST
+hdi_837i_x299_all_fields.dat,1255,1,1,0,0,1,0,False,1,1,0,ORPHAN_ST
+hdi_837p_all_fields.dat,4170,1,4,0,0,0,0,True,7,0,7,UNKNOWN_SEGMENT

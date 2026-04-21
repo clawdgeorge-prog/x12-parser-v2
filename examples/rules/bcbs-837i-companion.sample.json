@@ -1,0 +1,55 @@
+{
+  "name": "BCBS Institutional 837 Claim Companion Guide Rules",
+  "description": "Sample rule pack encoding common Blue Cross Blue Shield 837 Institutional (837I) expectations based on publicly documented X12 companion guide patterns. Not an official BCBS publication. Institutional claim requirements vary by state-level BCBS plan — verify with your specific plan's trading partner documentation.",
+  "match": {
+    "transaction_set": "837",
+    "version": "005010X223A1",
+    "payer_name_contains": "BLUE CROSS"
+  },
+  "rules": [
+    {
+      "id": "bcbs-837i-hi-required",
+      "segment": "HI",
+      "presence": "required",
+      "severity": "error",
+      "message": "HI (Diagnosis) segment is required for all 837I institutional claims per X12 TR3 and BCBS requirements."
+    },
+    {
+      "id": "bcbs-837i-cl1-required",
+      "segment": "CL1",
+      "presence": "required",
+      "severity": "error",
+      "message": "CL1 (Institutional Claim) segment is required for 837I. Must include admission type, admission source, and patient status codes."
+    },
+    {
+      "id": "bcbs-837i-nm1-billing-required",
+      "segment": "NM1",
+      "where": { "e1": "85" },
+      "presence": "required",
+      "severity": "error",
+      "message": "Billing Provider NM1 (entity code 85) is required. BCBS requires NPI in NM109 for all institutional claims."
+    },
+    {
+      "id": "bcbs-837i-nm1-payto-recommended",
+      "segment": "NM1",
+      "where": { "e1": "87" },
+      "presence": "recommended",
+      "severity": "warning",
+      "message": "Pay-to Provider NM1 (entity code 87) is often recommended when payment should route differently from the billing provider. Verify against the specific BCBS plan companion guide."
+    },
+    {
+      "id": "bcbs-837i-drg-required-inpatient",
+      "segment": "HI",
+      "presence": "required",
+      "severity": "warning",
+      "message": "DRG code in HI is standard for inpatient BCBS institutional claims. Verify with your specific BCBS plan for DRG version requirements."
+    },
+    {
+      "id": "bcbs-837i-clm-required",
+      "segment": "CLM",
+      "presence": "required",
+      "severity": "error",
+      "message": "CLM claim information is required for BCBS institutional adjudication and should be internally consistent with the rest of the claim payload."
+    }
+  ]
+}

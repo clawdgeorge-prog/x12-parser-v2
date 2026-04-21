@@ -1,0 +1,72 @@
+[
+  {
+    "file": "hdi_835_all_fields.dat",
+    "size_bytes": 2115,
+    "parse_json_code": 0,
+    "parse_json_stdout_head": "{\n  \"version\": \"0.1.0\",\n  \"interchanges\": [\n    {\n      \"header\": {\n        \"tag\": \"ISA\",\n        \"elements\": {\n          \"e1\": \"00\",\n          \"e2\": \"          \",\n          \"e3\": \"00\",\n          \"e4\": \"          \",\n          \"e5\": \"ZZ\",\n          \"e6\": \"ABCPAYER       \",\n          \"e7\": \"ZZ\",\n          \"e8\": \"ABCPAYER       \",\n          \"e9\": \"190827\",\n          \"e10\": \"0212\",\n          \"e11\": \"^\",\n          \"e12\": \"00501\",\n          \"e13\": \"191511902\",\n          \"e14\": \"0\",\n          \"e15\": \"P",
+    "parse_json_stderr_head": "",
+    "summary_code": 1,
+    "summary_stdout_head": "",
+    "summary_stderr_head": "Traceback (most recent call last):\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/runpy.py\", line 197, in _run_module_as_main\n    return _run_code(code, main_globals, None,\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Pyt",
+    "validate_code": 1,
+    "validate_stdout_head": "{\n  \"clean\": false,\n  \"issue_count\": 5,\n  \"error_count\": 1,\n  \"warning_count\": 4,\n  \"issues\": [\n    {\n      \"severity\": \"warning\",\n      \"code\": \"UNKNOWN_SEGMENT\",\n      \"category\": \"content\",\n      \"message\": \"Unknown segment tag 'TS3' at position 22; may indicate a typo or unsupported transaction type\",\n      \"segment_tag\": \"TS3\",\n      \"segment_position\": 22,\n      \"recommendation\": \"An unrecognized segment tag was encountered. This may be a typo, an unsupported optional segment, or an unsupp",
+    "validate_stderr_head": "",
+    "ndjson_code": 0,
+    "ndjson_stdout_head": "{\"_record_type\": \"interchange\", \"interchange_ctrl\": \"191511902\", \"isa_sender\": \"ABCPAYER\", \"isa_receiver\": \"ABCPAYER\", \"isa_date\": \"190827\", \"isa_time\": \"0212\", \"gs_count\": 1}\n{\"_record_type\": \"functional_group\", \"interchange_ctrl\": \"191511902\", \"gs_ctrl\": \"12345678\", \"gs_version\": \"005010X221A1\", \"gs_type\": \"HP\", \"gs_sender\": \"ABCD\", \"gs_receiver\": \"ABCD\", \"gs_date\": \"20190827\", \"transaction_count\": 1}\n{\"_record_type\": \"transaction_set\", \"interchange_ctrl\": \"191511902\", \"gs_ctrl\": \"12345678\", \"",
+    "ndjson_stderr_head": "",
+    "csv_code": 0,
+    "csv_files": [
+      "claims_835.csv",
+      "claims_837.csv",
+      "entities.csv",
+      "service_lines.csv"
+    ],
+    "sqlite_code": 0,
+    "sqlite_files": [
+      "IMPORT_GUIDE.txt",
+      "claims_835.csv",
+      "claims_837.csv",
+      "entities.csv",
+      "functional_groups.csv",
+      "interchanges.csv",
+      "schema.sql",
+      "service_lines.csv",
+      "transactions.csv"
+    ]
+  },
+  {
+    "file": "jobisez_sample_835.edi",
+    "size_bytes": 986,
+    "parse_json_code": 0,
+    "parse_json_stdout_head": "{\n  \"version\": \"0.1.0\",\n  \"interchanges\": []\n}\n",
+    "parse_json_stderr_head": "",
+    "summary_code": 0,
+    "summary_stdout_head": "\n",
+    "summary_stderr_head": "",
+    "validate_code": 1,
+    "validate_stdout_head": "{\n  \"clean\": false,\n  \"issue_count\": 1,\n  \"error_count\": 1,\n  \"warning_count\": 0,\n  \"issues\": [\n    {\n      \"severity\": \"error\",\n      \"code\": \"ORPHAN_ST\",\n      \"category\": \"envelope\",\n      \"message\": \"Orphan ST at position 1 (outside any GS/GE pair)\",\n      \"segment_tag\": \"ST\",\n      \"segment_position\": 1,\n      \"recommendation\": \"An ST segment appeared outside of a GS/GE functional group. All transaction sets must be inside a functional group.\"\n    }\n  ]\n}\n",
+    "validate_stderr_head": "",
+    "ndjson_code": 0,
+    "ndjson_stdout_head": "",
+    "ndjson_stderr_head": "",
+    "csv_code": 0,
+    "csv_files": [
+      "claims_835.csv",
+      "claims_837.csv",
+      "entities.csv",
+      "service_lines.csv"
+    ],
+    "sqlite_code": 0,
+    "sqlite_files": [
+      "IMPORT_GUIDE.txt",
+      "claims_835.csv",
+      "claims_837.csv",
+      "entities.csv",
+      "functional_groups.csv",
+      "interchanges.csv",
+      "schema.sql",
+      "service_lines.csv",
+      "transactions.csv"
+    ]
+  }
+]

@@ -1,0 +1,27 @@
+X12 Parser — SQLite Import Guide
+=================================
+
+1. Create the database and load the schema:
+   sqlite3 x12.db < schema.sql
+
+2. Import each CSV file (repeat for each file):
+   sqlite3 x12.db -cmd ".mode csv" -cmd ".import interchanges.csv interchanges" .quit
+   sqlite3 x12.db -cmd ".mode csv" -cmd ".import functional_groups.csv functional_groups" .quit
+   sqlite3 x12.db -cmd ".mode csv" -cmd ".import transactions.csv transactions" .quit
+   sqlite3 x12.db -cmd ".mode csv" -cmd ".import claims_835.csv claims_835" .quit
+   sqlite3 x12.db -cmd ".mode csv" -cmd ".import claims_837.csv claims_837" .quit
+   sqlite3 x12.db -cmd ".mode csv" -cmd ".import service_lines.csv service_lines" .quit
+   sqlite3 x12.db -cmd ".mode csv" -cmd ".import entities.csv entities" .quit
+
+3. Verify:
+   sqlite3 x12.db "SELECT COUNT(*) AS total_claims FROM claims_835;"
+   sqlite3 x12.db "SELECT * FROM claims_835 LIMIT 5;"
+
+Exported record counts:
+  claims_835.csv: 0 records
+  claims_837.csv: 0 records
+  entities.csv: 0 records
+  functional_groups.csv: 0 records
+  interchanges.csv: 0 records
+  service_lines.csv: 0 records
+  transactions.csv: 0 records

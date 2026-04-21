@@ -1,0 +1,1 @@
+interchange_ctrl,isa_sender,isa_receiver,gs_ctrl,gs_version,st_ctrl,transaction_type,claim_id,status_code,status_label,status_category,patient_name,clp_billed,clp_allowed,clp_paid,clp_adjustment,svc_billed,svc_paid,service_line_count,has_billed_discrepancy,has_paid_discrepancy,adjustment_group_codes,payer_name,provider_name,payment_amount,check_trace,bpr_payment_method

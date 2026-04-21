@@ -1,0 +1,56 @@
+{
+  "name": "Aetna 835 Remittance Companion Guide Rules",
+  "description": "Sample rule pack encoding common Aetna 835 remittance expectations based on publicly documented X12 companion guide patterns. Not an official Aetna publication. Verify against current Aetna trading partner documentation before production use.",
+  "match": {
+    "transaction_set": "835",
+    "version": "005010X221A1",
+    "payer_name_contains": "AETNA"
+  },
+  "rules": [
+    {
+      "id": "aetna-835-ref-tj-recommended",
+      "segment": "REF",
+      "where": { "e1": "TJ" },
+      "presence": "recommended",
+      "severity": "warning",
+      "message": "Aetna trading-partner setups often rely on REF*TJ (payer/provider tax identifier context) for downstream reconciliation. Recommended when present in the companion guide."
+    },
+    {
+      "id": "aetna-835-n1-payer-required",
+      "segment": "N1",
+      "where": { "e1": "PR" },
+      "presence": "required",
+      "severity": "error",
+      "message": "Aetna 835 files require N1*PR payer identification so downstream posting and reconciliation can identify the remitting payer."
+    },
+    {
+      "id": "aetna-835-trn-trace-required",
+      "segment": "TRN",
+      "presence": "required",
+      "severity": "error",
+      "message": "TRN segment is required on every 835 for payment tracing. Required by Aetna and all major payers."
+    },
+    {
+      "id": "aetna-835-n1-payee-recommended",
+      "segment": "N1",
+      "where": { "e1": "PE" },
+      "presence": "recommended",
+      "severity": "warning",
+      "message": "N1*PE payee identification is recommended for Aetna ERA files so payment routing and provider rollups remain explicit."
+    },
+    {
+      "id": "aetna-835-dtm-production-date-recommended",
+      "segment": "DTM",
+      "presence": "recommended",
+      "severity": "warning",
+      "message": "Aetna ERA workflows often benefit from DTM production/payment dates for audit trails and warehouse loading."
+    },
+    {
+      "id": "aetna-835-bpr-required",
+      "segment": "BPR",
+      "presence": "required",
+      "severity": "error",
+      "message": "BPR payment information is required for Aetna 835 processing and financial balancing."
+    }
+  ]
+}

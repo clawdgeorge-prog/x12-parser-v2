@@ -1,0 +1,26 @@
+{
+  "name": "Institutional 837 companion sample",
+  "description": "Example-only sample for a bounded 837I trading-partner rule pack.",
+  "match": {
+    "transaction_set": "837",
+    "version": "005010X223A1",
+    "payer_name_contains": "MEDICARE"
+  },
+  "rules": [
+    {
+      "id": "837i-hi-required",
+      "segment": "HI",
+      "presence": "required",
+      "severity": "error",
+      "message": "Institutional sample rule: HI diagnosis segment is required for this 837I companion pack."
+    },
+    {
+      "id": "837i-clm-frequency-sample",
+      "segment": "CLM",
+      "element": "e6",
+      "in": ["Y", "N"],
+      "severity": "warning",
+      "message": "Institutional sample rule: CLM06 should be a supported yes/no indicator in this example pack."
+    }
+  ]
+}
