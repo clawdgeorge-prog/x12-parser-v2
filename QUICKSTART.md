@@ -101,6 +101,12 @@ These analytics exports add bounded derived fields such as:
 - payment match key (`claim_id|check_trace`)
 - BPR-vs-paid balancing fields
 
+Directory input works here too, and aggregated analytics rows preserve `source_file` and `source_path` columns:
+
+```bash
+python3 -m src.cli tests/fixtures/ --format analytics -o out/analytics_batch
+```
+
 Optional Parquet variant:
 
 ```bash
@@ -136,6 +142,8 @@ Writes:
 - `duplicate_suspects.csv`
 - `balance_anomalies.csv`
 - `summary.json`
+
+You can also reconcile a directory of 835 files in one pass. The summary includes `parsed_file_count`, and matched rows preserve source lineage.
 
 ## 6) Recommended new-user workflow
 

@@ -63,45 +63,57 @@ def _match_reason(ref: dict, match: dict | None, variance_paid: float | None) ->
     return f"Matched with negative variance ({variance_paid:+.2f})"
 
 
+def _iter_documents(data: dict):
+    if data.get("batch"):
+        yield from data.get("documents", [])
+    else:
+        yield data
+
+
 def _claim_rows_from_data(data: dict) -> list[dict]:
     rows: list[dict] = []
-    for ic in data.get("interchanges", []):
-        interchange_ctrl = ic.get("header", {}).get("elements", {}).get("e13", "")
-        for fg in ic.get("functional_groups", []):
-            for ts in fg.get("transactions", []):
-                if ts.get("set_id") != "835":
-                    continue
-                summary = ts.get("summary", {})
-                balancing = summary.get("balancing_summary", {})
-                st_ctrl = ts.get("header", {}).get("elements", {}).get("e2", "")
-                for claim in summary.get("claims", []):
-                    row = {
-                        "interchange_ctrl": interchange_ctrl,
-                        "st_ctrl": st_ctrl,
-                        "claim_id": claim.get("claim_id", ""),
-                        "status_code": claim.get("status_code", ""),
-                        "status_label": claim.get("status_label", ""),
-                        "status_category": claim.get("status_category", ""),
-                        "patient_name": claim.get("patient_name", ""),
-                        "clp_billed": claim.get("clp_billed"),
-                        "clp_allowed": claim.get("clp_allowed"),
-                        "clp_paid": claim.get("clp_paid"),
-                        "svc_billed": claim.get("svc_billed"),
-                        "svc_paid": claim.get("svc_paid"),
-                        "clp_adjustment": claim.get("clp_adjustment"),
-                        "cas_adjustment_sum": claim.get("cas_adjustment_sum"),
-                        "has_billed_discrepancy": bool(claim.get("has_billed_discrepancy", False)),
-                        "has_paid_discrepancy": bool(claim.get("has_paid_discrepancy", False)),
-                        "payer_name": summary.get("payer_name", ""),
-                        "provider_name": summary.get("provider_name", ""),
-                        "payment_amount": summary.get("payment_amount"),
-                        "check_trace": summary.get("check_trace", ""),
-                        "bpr_payment_method": summary.get("bpr_payment_method", ""),
-                        "bpr_account_type": summary.get("bpr_account_type", ""),
-                        "bpr_vs_paid_difference": balancing.get("bpr_vs_clp_difference"),
-                        "bpr_vs_paid_balanced": balancing.get("bpr_vs_clp_balanced"),
-                    }
-                    rows.append(row)
+    for document in _iter_documents(data):
+        source_file = document.get("source_file", "")
+        source_path = document.get("source_path", "")
+        for ic in document.get("interchanges", []):
+            interchange_ctrl = ic.get("header", {}).get("elements", {}).get("e13", "")
+            for fg in ic.get("functional_groups", []):
+                for ts in fg.get("transactions", []):
+                    if ts.get("set_id") != "835":
+                        continue
+                    summary = ts.get("summary", {})
+                    balancing = summary.get("balancing_summary", {})
+                    st_ctrl = ts.get("header", {}).get("elements", {}).get("e2", "")
+                    for claim in summary.get("claims", []):
+                        row = {
+                            "source_file": source_file,
+                            "source_path": source_path,
+                            "interchange_ctrl": interchange_ctrl,
+                            "st_ctrl": st_ctrl,
+                            "claim_id": claim.get("claim_id", ""),
+                            "status_code": claim.get("status_code", ""),
+                            "status_label": claim.get("status_label", ""),
+                            "status_category": claim.get("status_category", ""),
+                            "patient_name": claim.get("patient_name", ""),
+                            "clp_billed": claim.get("clp_billed"),
+                            "clp_allowed": claim.get("clp_allowed"),
+                            "clp_paid": claim.get("clp_paid"),
+                            "svc_billed": claim.get("svc_billed"),
+                            "svc_paid": claim.get("svc_paid"),
+                            "clp_adjustment": claim.get("clp_adjustment"),
+                            "cas_adjustment_sum": claim.get("cas_adjustment_sum"),
+                            "has_billed_discrepancy": bool(claim.get("has_billed_discrepancy", False)),
+                            "has_paid_discrepancy": bool(claim.get("has_paid_discrepancy", False)),
+                            "payer_name": summary.get("payer_name", ""),
+                            "provider_name": summary.get("provider_name", ""),
+                            "payment_amount": summary.get("payment_amount"),
+                            "check_trace": summary.get("check_trace", ""),
+                            "bpr_payment_method": summary.get("bpr_payment_method", ""),
+                            "bpr_account_type": summary.get("bpr_account_type", ""),
+                            "bpr_vs_paid_difference": balancing.get("bpr_vs_clp_difference"),
+                            "bpr_vs_paid_balanced": balancing.get("bpr_vs_clp_balanced"),
+                        }
+                        rows.append(row)
     return rows
 
 
@@ -181,7 +193,9 @@ def reconcile_data(data: dict, reference_claims: Iterable[dict] | None = None, t
 
     total_paid = round(sum(_to_float(r.get("clp_paid")) or 0.0 for r in claim_rows), 2)
     total_billed = round(sum(_to_float(r.get("clp_billed")) or 0.0 for r in claim_rows), 2)
+    documents = list(_iter_documents(data))
     summary = {
+        "parsed_file_count": len(documents),
         "parsed_claim_count": len(claim_rows),
         "matched_claim_count": len(matched_payments),
         "unmatched_reference_claim_count": len(unmatched_reference_claims),

@@ -146,9 +146,13 @@ Batch CSV and SQLite row outputs now include `source_file` and `source_path` col
   - `ANALYTICS_SCHEMA.json` — stable field/type hints for warehouse import
   - `duckdb_import.sql` — starter SQL for querying the CSV bundle from DuckDB
 
+When analytics export is run against a directory, it aggregates all parsed files into one bundle and preserves file lineage with `source_file` and `source_path` columns in the analytics claim and reconciliation extracts.
+
 **`analytics-parquet`** — optional Parquet form of the analytics bundle. This currently requires `pip install -e .[parquet]` (pandas + pyarrow). It is a convenience export, not a claim of first-class native DuckDB integration.
 
 **`reconcile`** — a bounded 835 reconciliation bundle. Optionally matches parsed 835 claims against a reference CSV (`claim_id` required, `expected_paid` optional) and writes matched rows, unmatched references, duplicate suspects, balance anomalies, and a summary JSON.
+
+Directory input is supported here as well for batch 835 reconciliation. The output summary includes `parsed_file_count`, and matched claim rows retain `source_file` and `source_path` lineage.
 
 All monetary fields in CSV/SQLite/analytics exports are expressed as plain decimal strings (e.g. `"250.00"`). `null`/missing values are written as empty strings, which SQLite and DuckDB can normalize with `NULLIF(col,'')` when you want typed null handling.
 

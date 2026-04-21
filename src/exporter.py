@@ -388,7 +388,7 @@ CSV_ENTITY_FIELDS = [
 ]
 
 CSV_ANALYTICS_835_FIELDS = [
-    "interchange_ctrl", "isa_sender", "isa_receiver", "gs_ctrl", "gs_version",
+    "source_file", "source_path", "interchange_ctrl", "isa_sender", "isa_receiver", "gs_ctrl", "gs_version",
     "st_ctrl", "transaction_type", "claim_id", "status_code", "status_label",
     "status_category", "patient_name", "clp_billed", "clp_allowed", "clp_paid",
     "clp_adjustment", "svc_billed", "svc_paid", "service_line_count",
@@ -400,7 +400,7 @@ CSV_ANALYTICS_835_FIELDS = [
 ]
 
 CSV_ANALYTICS_837_FIELDS = [
-    "interchange_ctrl", "isa_sender", "isa_receiver", "gs_ctrl", "gs_version",
+    "source_file", "source_path", "interchange_ctrl", "isa_sender", "isa_receiver", "gs_ctrl", "gs_version",
     "st_ctrl", "transaction_type", "claim_id", "variant", "variant_indicator",
     "clp_billed", "total_svc_billed", "total_svc_paid", "service_line_count",
     "estimated_unpaid_amount", "has_discrepancy", "discrepancy_reason",
@@ -410,7 +410,7 @@ CSV_ANALYTICS_837_FIELDS = [
 ]
 
 CSV_RECONCILIATION_835_FIELDS = [
-    "interchange_ctrl", "st_ctrl", "claim_id", "reconciliation_status",
+    "source_file", "source_path", "interchange_ctrl", "st_ctrl", "claim_id", "reconciliation_status",
     "status_code", "status_label", "clp_billed", "clp_paid", "svc_billed",
     "svc_paid", "cas_adjustment_sum", "has_billed_discrepancy",
     "has_paid_discrepancy", "bpr_payment_amount", "bpr_vs_paid_difference",
@@ -613,176 +613,185 @@ def write_analytics_parquet_bundle(data: dict, output_dir: pathlib.Path) -> dict
 
 def _build_835_analytics_records(data: dict) -> Iterator[dict]:
     """Yield enriched 835 claim records for BI / analytics workflows."""
-    for ic in data.get("interchanges", []):
-        ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
-        isa_sender = _safe(ic.get("isa06_sender", ""))
-        isa_receiver = _safe(ic.get("isa08_receiver", ""))
-        for fg in ic.get("functional_groups", []):
-            gs_ctrl = _safe(fg.get("header", {}).get("elements", {}).get("e6", ""))
-            gs_version = _safe(fg.get("header", {}).get("elements", {}).get("e8", ""))
-            for ts in fg.get("transactions", []):
-                if ts.get("set_id") != "835":
-                    continue
-                summary = ts.get("summary", {})
-                st_ctrl = _safe(ts.get("header", {}).get("elements", {}).get("e2", ""))
-                discrepancies_by_claim: dict[str, list[str]] = {}
-                for disc in summary.get("discrepancies", []):
-                    claim_id = _safe(disc.get("claim_id", ""))
-                    if not claim_id:
+    for document, source_file, source_path in _iter_document_contexts(data):
+        for ic in document.get("interchanges", []):
+            ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
+            isa_sender = _safe(ic.get("isa06_sender", ""))
+            isa_receiver = _safe(ic.get("isa08_receiver", ""))
+            for fg in ic.get("functional_groups", []):
+                gs_ctrl = _safe(fg.get("header", {}).get("elements", {}).get("e6", ""))
+                gs_version = _safe(fg.get("header", {}).get("elements", {}).get("e8", ""))
+                for ts in fg.get("transactions", []):
+                    if ts.get("set_id") != "835":
                         continue
-                    discrepancies_by_claim.setdefault(claim_id, []).append(_safe(disc.get("type", "")))
+                    summary = ts.get("summary", {})
+                    st_ctrl = _safe(ts.get("header", {}).get("elements", {}).get("e2", ""))
+                    discrepancies_by_claim: dict[str, list[str]] = {}
+                    for disc in summary.get("discrepancies", []):
+                        claim_id = _safe(disc.get("claim_id", ""))
+                        if not claim_id:
+                            continue
+                        discrepancies_by_claim.setdefault(claim_id, []).append(_safe(disc.get("type", "")))
 
-                balancing = summary.get("balancing_summary", {})
-                for claim in summary.get("claims", []):
-                    claim_id = _safe(claim.get("claim_id", ""))
-                    clp_billed = claim.get("clp_billed")
-                    clp_allowed = claim.get("clp_allowed")
-                    clp_paid = claim.get("clp_paid")
-                    estimated_unpaid = None
-                    if clp_billed is not None and clp_paid is not None:
-                        estimated_unpaid = round(float(clp_billed) - float(clp_paid), 2)
-                    allowed_gap = None
-                    if clp_billed is not None and clp_allowed is not None:
-                        allowed_gap = round(float(clp_billed) - float(clp_allowed), 2)
-                    yield {
-                        "interchange_ctrl": ic_ctrl,
-                        "isa_sender": isa_sender,
-                        "isa_receiver": isa_receiver,
-                        "gs_ctrl": gs_ctrl,
-                        "gs_version": gs_version,
-                        "st_ctrl": st_ctrl,
-                        "transaction_type": "835",
-                        "claim_id": claim_id,
-                        "status_code": _safe(claim.get("status_code", "")),
-                        "status_label": _safe(claim.get("status_label", "")),
-                        "status_category": _safe(claim.get("status_category", "")),
-                        "patient_name": _safe(claim.get("patient_name", "")),
-                        "clp_billed": _fmt_money(claim.get("clp_billed")),
-                        "clp_allowed": _fmt_money(claim.get("clp_allowed")),
-                        "clp_paid": _fmt_money(claim.get("clp_paid")),
-                        "clp_adjustment": _fmt_money(claim.get("clp_adjustment")),
-                        "svc_billed": _fmt_money(claim.get("svc_billed")),
-                        "svc_paid": _fmt_money(claim.get("svc_paid")),
-                        "service_line_count": _safe(claim.get("service_line_count", "")),
-                        "estimated_unpaid_amount": _fmt_money(estimated_unpaid),
-                        "allowed_gap_amount": _fmt_money(allowed_gap),
-                        "cas_adjustment_sum": _fmt_money(claim.get("cas_adjustment_sum")),
-                        "cas_adjustments_by_group_json": json.dumps(
-                            claim.get("cas_adjustments_by_group", {}), ensure_ascii=False, sort_keys=True
-                        ),
-                        "adjustment_group_codes": ",".join(
-                            c.get("code", "") for c in claim.get("adjustment_group_codes", [])
-                        ),
-                        "has_billed_discrepancy": str(claim.get("has_billed_discrepancy", False)),
-                        "has_paid_discrepancy": str(claim.get("has_paid_discrepancy", False)),
-                        "discrepancy_types": ",".join(discrepancies_by_claim.get(claim_id, [])),
-                        "payer_name": _safe(summary.get("payer_name", "")),
-                        "provider_name": _safe(summary.get("provider_name", "")),
-                        "payment_amount": _fmt_money(summary.get("payment_amount")),
-                        "check_trace": _safe(summary.get("check_trace", "")),
-                        "bpr_payment_method": _safe(summary.get("bpr_payment_method", "")),
-                        "bpr_account_type": _safe(summary.get("bpr_account_type", "")),
-                        "bpr_vs_paid_difference": _fmt_money(balancing.get("bpr_vs_clp_difference")),
-                        "bpr_vs_paid_balanced": str(balancing.get("bpr_vs_clp_balanced", "")),
-                        "payment_match_key": f"{claim_id}|{_safe(summary.get('check_trace', ''))}",
-                    }
+                    balancing = summary.get("balancing_summary", {})
+                    for claim in summary.get("claims", []):
+                        claim_id = _safe(claim.get("claim_id", ""))
+                        clp_billed = claim.get("clp_billed")
+                        clp_allowed = claim.get("clp_allowed")
+                        clp_paid = claim.get("clp_paid")
+                        estimated_unpaid = None
+                        if clp_billed is not None and clp_paid is not None:
+                            estimated_unpaid = round(float(clp_billed) - float(clp_paid), 2)
+                        allowed_gap = None
+                        if clp_billed is not None and clp_allowed is not None:
+                            allowed_gap = round(float(clp_billed) - float(clp_allowed), 2)
+                        yield {
+                            "source_file": source_file,
+                            "source_path": source_path,
+                            "interchange_ctrl": ic_ctrl,
+                            "isa_sender": isa_sender,
+                            "isa_receiver": isa_receiver,
+                            "gs_ctrl": gs_ctrl,
+                            "gs_version": gs_version,
+                            "st_ctrl": st_ctrl,
+                            "transaction_type": "835",
+                            "claim_id": claim_id,
+                            "status_code": _safe(claim.get("status_code", "")),
+                            "status_label": _safe(claim.get("status_label", "")),
+                            "status_category": _safe(claim.get("status_category", "")),
+                            "patient_name": _safe(claim.get("patient_name", "")),
+                            "clp_billed": _fmt_money(claim.get("clp_billed")),
+                            "clp_allowed": _fmt_money(claim.get("clp_allowed")),
+                            "clp_paid": _fmt_money(claim.get("clp_paid")),
+                            "clp_adjustment": _fmt_money(claim.get("clp_adjustment")),
+                            "svc_billed": _fmt_money(claim.get("svc_billed")),
+                            "svc_paid": _fmt_money(claim.get("svc_paid")),
+                            "service_line_count": _safe(claim.get("service_line_count", "")),
+                            "estimated_unpaid_amount": _fmt_money(estimated_unpaid),
+                            "allowed_gap_amount": _fmt_money(allowed_gap),
+                            "cas_adjustment_sum": _fmt_money(claim.get("cas_adjustment_sum")),
+                            "cas_adjustments_by_group_json": json.dumps(
+                                claim.get("cas_adjustments_by_group", {}), ensure_ascii=False, sort_keys=True
+                            ),
+                            "adjustment_group_codes": ",".join(
+                                c.get("code", "") for c in claim.get("adjustment_group_codes", [])
+                            ),
+                            "has_billed_discrepancy": str(claim.get("has_billed_discrepancy", False)),
+                            "has_paid_discrepancy": str(claim.get("has_paid_discrepancy", False)),
+                            "discrepancy_types": ",".join(discrepancies_by_claim.get(claim_id, [])),
+                            "payer_name": _safe(summary.get("payer_name", "")),
+                            "provider_name": _safe(summary.get("provider_name", "")),
+                            "payment_amount": _fmt_money(summary.get("payment_amount")),
+                            "check_trace": _safe(summary.get("check_trace", "")),
+                            "bpr_payment_method": _safe(summary.get("bpr_payment_method", "")),
+                            "bpr_account_type": _safe(summary.get("bpr_account_type", "")),
+                            "bpr_vs_paid_difference": _fmt_money(balancing.get("bpr_vs_clp_difference")),
+                            "bpr_vs_paid_balanced": str(balancing.get("bpr_vs_clp_balanced", "")),
+                            "payment_match_key": f"{claim_id}|{_safe(summary.get('check_trace', ''))}",
+                        }
 
 
 def _build_837_analytics_records(data: dict) -> Iterator[dict]:
     """Yield enriched 837 claim records for analytics workflows."""
-    for ic in data.get("interchanges", []):
-        ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
-        isa_sender = _safe(ic.get("isa06_sender", ""))
-        isa_receiver = _safe(ic.get("isa08_receiver", ""))
-        for fg in ic.get("functional_groups", []):
-            gs_ctrl = _safe(fg.get("header", {}).get("elements", {}).get("e6", ""))
-            gs_version = _safe(fg.get("header", {}).get("elements", {}).get("e8", ""))
-            for ts in fg.get("transactions", []):
-                if ts.get("set_id") != "837":
-                    continue
-                summary = ts.get("summary", {})
-                hierarchy = summary.get("hierarchy", {})
-                st_ctrl = _safe(ts.get("header", {}).get("elements", {}).get("e2", ""))
-                for claim in summary.get("claims", []):
-                    clm_billed = claim.get("clp_billed")
-                    total_svc_billed = claim.get("total_svc_billed")
-                    estimated_unpaid = None
-                    if clm_billed is not None and total_svc_billed is not None:
-                        estimated_unpaid = round(float(clm_billed) - float(total_svc_billed), 2)
-                    yield {
-                        "interchange_ctrl": ic_ctrl,
-                        "isa_sender": isa_sender,
-                        "isa_receiver": isa_receiver,
-                        "gs_ctrl": gs_ctrl,
-                        "gs_version": gs_version,
-                        "st_ctrl": st_ctrl,
-                        "transaction_type": "837",
-                        "claim_id": _safe(claim.get("claim_id", "")),
-                        "variant": _safe(summary.get("variant", "")),
-                        "variant_indicator": _safe(summary.get("variant_indicator", "")),
-                        "clp_billed": _fmt_money(claim.get("clp_billed")),
-                        "total_svc_billed": _fmt_money(claim.get("total_svc_billed")),
-                        "total_svc_paid": _fmt_money(claim.get("total_svc_paid")),
-                        "service_line_count": _safe(len(claim.get("service_lines", []))),
-                        "estimated_unpaid_amount": _fmt_money(estimated_unpaid),
-                        "has_discrepancy": str(claim.get("has_discrepancy", False)),
-                        "discrepancy_reason": _safe(claim.get("discrepancy_reason", "")),
-                        "billing_provider": _safe(summary.get("billing_provider", "")),
-                        "payer_name": _safe(summary.get("payer_name", "")),
-                        "submitter_name": _safe(summary.get("submitter_name", "")),
-                        "subscriber_name": _safe(summary.get("subscriber_name", "")),
-                        "patient_name": _safe(summary.get("patient_name", "")),
-                        "bht_id": _safe(summary.get("bht_id", "")),
-                        "bht_date": _safe(summary.get("bht_date", "")),
-                        "billing_provider_hl_id": _safe(hierarchy.get("billing_provider_hl_id", "")),
-                        "subscriber_hl_id": _safe(hierarchy.get("subscriber_hl_id", "")),
-                        "patient_hl_id": _safe(hierarchy.get("patient_hl_id", "")),
-                    }
+    for document, source_file, source_path in _iter_document_contexts(data):
+        for ic in document.get("interchanges", []):
+            ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
+            isa_sender = _safe(ic.get("isa06_sender", ""))
+            isa_receiver = _safe(ic.get("isa08_receiver", ""))
+            for fg in ic.get("functional_groups", []):
+                gs_ctrl = _safe(fg.get("header", {}).get("elements", {}).get("e6", ""))
+                gs_version = _safe(fg.get("header", {}).get("elements", {}).get("e8", ""))
+                for ts in fg.get("transactions", []):
+                    if ts.get("set_id") != "837":
+                        continue
+                    summary = ts.get("summary", {})
+                    hierarchy = summary.get("hierarchy", {})
+                    st_ctrl = _safe(ts.get("header", {}).get("elements", {}).get("e2", ""))
+                    for claim in summary.get("claims", []):
+                        clm_billed = claim.get("clp_billed")
+                        total_svc_billed = claim.get("total_svc_billed")
+                        estimated_unpaid = None
+                        if clm_billed is not None and total_svc_billed is not None:
+                            estimated_unpaid = round(float(clm_billed) - float(total_svc_billed), 2)
+                        yield {
+                            "source_file": source_file,
+                            "source_path": source_path,
+                            "interchange_ctrl": ic_ctrl,
+                            "isa_sender": isa_sender,
+                            "isa_receiver": isa_receiver,
+                            "gs_ctrl": gs_ctrl,
+                            "gs_version": gs_version,
+                            "st_ctrl": st_ctrl,
+                            "transaction_type": "837",
+                            "claim_id": _safe(claim.get("claim_id", "")),
+                            "variant": _safe(summary.get("variant", "")),
+                            "variant_indicator": _safe(summary.get("variant_indicator", "")),
+                            "clp_billed": _fmt_money(claim.get("clp_billed")),
+                            "total_svc_billed": _fmt_money(claim.get("total_svc_billed")),
+                            "total_svc_paid": _fmt_money(claim.get("total_svc_paid")),
+                            "service_line_count": _safe(len(claim.get("service_lines", []))),
+                            "estimated_unpaid_amount": _fmt_money(estimated_unpaid),
+                            "has_discrepancy": str(claim.get("has_discrepancy", False)),
+                            "discrepancy_reason": _safe(claim.get("discrepancy_reason", "")),
+                            "billing_provider": _safe(summary.get("billing_provider", "")),
+                            "payer_name": _safe(summary.get("payer_name", "")),
+                            "submitter_name": _safe(summary.get("submitter_name", "")),
+                            "subscriber_name": _safe(summary.get("subscriber_name", "")),
+                            "patient_name": _safe(summary.get("patient_name", "")),
+                            "bht_id": _safe(summary.get("bht_id", "")),
+                            "bht_date": _safe(summary.get("bht_date", "")),
+                            "billing_provider_hl_id": _safe(hierarchy.get("billing_provider_hl_id", "")),
+                            "subscriber_hl_id": _safe(hierarchy.get("subscriber_hl_id", "")),
+                            "patient_hl_id": _safe(hierarchy.get("patient_hl_id", "")),
+                        }
 
 
 def _build_835_reconciliation_records(data: dict) -> Iterator[dict]:
     """Yield one claim-level 835 reconciliation row per claim."""
-    for ic in data.get("interchanges", []):
-        ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
-        for fg in ic.get("functional_groups", []):
-            for ts in fg.get("transactions", []):
-                if ts.get("set_id") != "835":
-                    continue
-                summary = ts.get("summary", {})
-                balancing = summary.get("balancing_summary", {})
-                st_ctrl = _safe(ts.get("header", {}).get("elements", {}).get("e2", ""))
-                for claim in summary.get("claims", []):
-                    has_billed = bool(claim.get("has_billed_discrepancy", False))
-                    has_paid = bool(claim.get("has_paid_discrepancy", False))
-                    if has_billed and has_paid:
-                        status = "claim_and_payment_mismatch"
-                    elif has_billed:
-                        status = "claim_mismatch"
-                    elif has_paid:
-                        status = "payment_mismatch"
-                    else:
-                        status = "balanced"
-                    yield {
-                        "interchange_ctrl": ic_ctrl,
-                        "st_ctrl": st_ctrl,
-                        "claim_id": _safe(claim.get("claim_id", "")),
-                        "reconciliation_status": status,
-                        "status_code": _safe(claim.get("status_code", "")),
-                        "status_label": _safe(claim.get("status_label", "")),
-                        "clp_billed": _fmt_money(claim.get("clp_billed")),
-                        "clp_paid": _fmt_money(claim.get("clp_paid")),
-                        "svc_billed": _fmt_money(claim.get("svc_billed")),
-                        "svc_paid": _fmt_money(claim.get("svc_paid")),
-                        "cas_adjustment_sum": _fmt_money(claim.get("cas_adjustment_sum")),
-                        "has_billed_discrepancy": str(has_billed),
-                        "has_paid_discrepancy": str(has_paid),
-                        "bpr_payment_amount": _fmt_money(balancing.get("bpr_payment_amount")),
-                        "bpr_vs_paid_difference": _fmt_money(balancing.get("bpr_vs_clp_difference")),
-                        "bpr_vs_paid_balanced": str(balancing.get("bpr_vs_clp_balanced", "")),
-                        "check_trace": _safe(summary.get("check_trace", "")),
-                        "payer_name": _safe(summary.get("payer_name", "")),
-                        "provider_name": _safe(summary.get("provider_name", "")),
-                    }
+    for document, source_file, source_path in _iter_document_contexts(data):
+        for ic in document.get("interchanges", []):
+            ic_ctrl = _safe(ic.get("header", {}).get("elements", {}).get("e13", ""))
+            for fg in ic.get("functional_groups", []):
+                for ts in fg.get("transactions", []):
+                    if ts.get("set_id") != "835":
+                        continue
+                    summary = ts.get("summary", {})
+                    balancing = summary.get("balancing_summary", {})
+                    st_ctrl = _safe(ts.get("header", {}).get("elements", {}).get("e2", ""))
+                    for claim in summary.get("claims", []):
+                        has_billed = bool(claim.get("has_billed_discrepancy", False))
+                        has_paid = bool(claim.get("has_paid_discrepancy", False))
+                        if has_billed and has_paid:
+                            status = "claim_and_payment_mismatch"
+                        elif has_billed:
+                            status = "claim_mismatch"
+                        elif has_paid:
+                            status = "payment_mismatch"
+                        else:
+                            status = "balanced"
+                        yield {
+                            "source_file": source_file,
+                            "source_path": source_path,
+                            "interchange_ctrl": ic_ctrl,
+                            "st_ctrl": st_ctrl,
+                            "claim_id": _safe(claim.get("claim_id", "")),
+                            "reconciliation_status": status,
+                            "status_code": _safe(claim.get("status_code", "")),
+                            "status_label": _safe(claim.get("status_label", "")),
+                            "clp_billed": _fmt_money(claim.get("clp_billed")),
+                            "clp_paid": _fmt_money(claim.get("clp_paid")),
+                            "svc_billed": _fmt_money(claim.get("svc_billed")),
+                            "svc_paid": _fmt_money(claim.get("svc_paid")),
+                            "cas_adjustment_sum": _fmt_money(claim.get("cas_adjustment_sum")),
+                            "has_billed_discrepancy": str(has_billed),
+                            "has_paid_discrepancy": str(has_paid),
+                            "bpr_payment_amount": _fmt_money(balancing.get("bpr_payment_amount")),
+                            "bpr_vs_paid_difference": _fmt_money(balancing.get("bpr_vs_clp_difference")),
+                            "bpr_vs_paid_balanced": str(balancing.get("bpr_vs_clp_balanced", "")),
+                            "check_trace": _safe(summary.get("check_trace", "")),
+                            "payer_name": _safe(summary.get("payer_name", "")),
+                            "provider_name": _safe(summary.get("provider_name", "")),
+                        }
 
 
 def write_analytics_bundle(data: dict, output_dir: pathlib.Path) -> dict:
