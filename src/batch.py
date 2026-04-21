@@ -6,11 +6,20 @@ from typing import Any, Iterable
 from src.parser import X12Parser
 
 
-DEFAULT_GLOB_PATTERNS = ("*.edi", "*.x12", "*.txt")
+DEFAULT_GLOB_PATTERNS = ("*.edi", "*.x12")
+OPTIONAL_TEXT_GLOB_PATTERNS = ("*.txt",)
+MAX_BATCH_FILES = 1000
 
 
-def discover_input_files(path: Path, patterns: Iterable[str] | None = None) -> list[Path]:
+def discover_input_files(
+    path: Path,
+    patterns: Iterable[str] | None = None,
+    include_text_files: bool = False,
+    max_files: int = MAX_BATCH_FILES,
+) -> list[Path]:
     patterns = tuple(patterns or DEFAULT_GLOB_PATTERNS)
+    if include_text_files:
+        patterns = patterns + OPTIONAL_TEXT_GLOB_PATTERNS
     if path.is_file():
         return [path]
     if not path.exists():
@@ -25,6 +34,11 @@ def discover_input_files(path: Path, patterns: Iterable[str] | None = None) -> l
             if candidate.is_file() and candidate not in seen:
                 seen.add(candidate)
                 files.append(candidate)
+                if len(files) > max_files:
+                    raise ValueError(
+                        f"Input directory yielded more than {max_files} candidate files. "
+                        "Refine the directory contents or raise the batch file limit."
+                    )
     return files
 
 
@@ -55,7 +69,7 @@ def parse_inputs(paths: Iterable[Path]) -> tuple[list[dict], list[dict]]:
             parser = X12Parser.from_file(input_path)
             parsed = append_source_metadata(parser.to_dict(), input_path)
             parsed_documents.append(parsed)
-        except Exception as exc:  # pragma: no cover, exercised by CLI tests
+        except (OSError, UnicodeDecodeError, ValueError) as exc:  # pragma: no cover
             failures.append(
                 {
                     "source_file": input_path.name,

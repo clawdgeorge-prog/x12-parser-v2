@@ -145,8 +145,14 @@ def main() -> None:
 
     try:
         data = _load_input(args.file)
-    except Exception as exc:
-        print(f"ERROR parsing {args.file}: {exc}", file=sys.stderr)
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except OSError as exc:
+        print(f"ERROR reading {args.file}: {exc}", file=sys.stderr)
         sys.exit(1)
 
     if args.summary:

@@ -51,7 +51,7 @@ def _match_reason(ref: dict, match: dict | None, variance_paid: float | None) ->
     if match is None:
         claim_id = ref.get("claim_id", "")
         expected = ref.get("expected_paid")
-        if expected:
+        if expected is not None and expected != "":
             return f"No claim found with ID '{claim_id}' and amount near {expected}"
         return f"No claim found with ID '{claim_id}'"
     if variance_paid is None:
@@ -228,7 +228,16 @@ def reconcile_from_file(edi_path: str | Path, reference_claims: Iterable[dict] |
 
 def read_reference_claims_csv(path: str | Path) -> list[dict]:
     with open(path, newline="") as f:
-        return list(csv.DictReader(f))
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        if "claim_id" not in fieldnames:
+            raise ValueError("Reference CSV must include a 'claim_id' header")
+        allowed = {"claim_id", "expected_paid"}
+        rows = list(reader)
+        for row in rows:
+            if "expected_paid" in row and row["expected_paid"] not in (None, ""):
+                _to_float(row["expected_paid"])
+        return rows
 
 
 def write_reconciliation_bundle(result: ReconciliationResult, output_dir: str | Path) -> dict[str, int]:

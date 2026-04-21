@@ -140,8 +140,9 @@ class X12Tokenizer:
 class X12SegmentParser:
     """Parse a single raw segment string into a Segment dataclass."""
 
-    def __init__(self, elem_sep: str = DEFAULT_ELEM_SEP):
+    def __init__(self, elem_sep: str = DEFAULT_ELEM_SEP, comp_sep: str = DEFAULT_COMP_SEP):
         self.elem_sep = elem_sep
+        self.comp_sep = comp_sep
 
     def parse(self, raw: str, position: int = 0) -> Segment:
         parts = raw.split(self.elem_sep)
@@ -159,7 +160,7 @@ class X12SegmentParser:
             return None
         e = seg.elements[idx].raw
         if sub_index is not None:
-            parts = e.split(":")
+            parts = e.split(self.comp_sep)
             si = sub_index - 1
             return parts[si] if si < len(parts) else None
         return e
@@ -536,6 +537,7 @@ class X12Parser:
         self.segments: List[Segment] = []
         self.interchanges: List[Interchange] = []
         self._seg_parser = X12SegmentParser()
+        self.warnings: List[dict] = []
         self._parsed = False
         self._summary_computed = False
 
@@ -592,8 +594,12 @@ class X12Parser:
                 rep = parts[11].strip()
                 if rep and len(rep) == 1:
                     rep_sep = rep
-        except Exception:
-            pass  # keep default
+        except (AttributeError, IndexError, ValueError) as exc:
+            self.warnings.append({
+                "type": "delimiter_detection_warning",
+                "message": str(exc),
+                "context": "ISA repetition separator detection",
+            })
         
         return elem_sep, comp_sep, rep_sep, seg_term
 
@@ -610,7 +616,7 @@ class X12Parser:
         raw_segs = tokenizer.tokenize(text)
 
         # Update segment parser with detected element separator
-        self._seg_parser = X12SegmentParser(elem_sep=elem_sep)
+        self._seg_parser = X12SegmentParser(elem_sep=elem_sep, comp_sep=comp_sep)
         self.segments = [
             self._seg_parser.parse(raw=s, position=i + 1)
             for i, s in enumerate(raw_segs)
@@ -1498,6 +1504,7 @@ class X12Parser:
         return {
             "version": __version__,
             "schema_version": OUTPUT_SCHEMA_VERSION,
+            "warnings": self.warnings,
             # Metadata about parsing decisions that may affect downstream consumers
             "metadata": {
                 # Loop IDs are derived from the first element of the loop's leader segment
