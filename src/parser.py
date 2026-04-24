@@ -623,6 +623,8 @@ class X12Parser:
         ]
 
         self.interchanges = self._build_interchanges()
+        if not self.interchanges and self.segments:
+            self.interchanges = self._build_synthetic_interchanges()
 
     def _find_segment(self, tag: str, start: int = 0) -> Optional[tuple[Segment, int]]:
         for i in range(start, len(self.segments)):
@@ -660,6 +662,80 @@ class X12Parser:
             else:
                 i += 1
         return interchanges
+
+    def _infer_transaction_set_id(self, segments: List[Segment]) -> str:
+        tags = {seg.tag for seg in segments}
+        if "CLP" in tags or "BPR" in tags or "SVC" in tags:
+            return "835"
+        if "CLM" in tags or "SV1" in tags or "SV2" in tags or "SV3" in tags:
+            return "837"
+        return "?"
+
+    def _build_synthetic_interchanges(self) -> List[Interchange]:
+        """Build envelope placeholders for GS/ST-less or ISA-less files.
+
+        This supports real-world external files that are delivered as:
+        - GS/ST transactions without ISA/IEA
+        - bare ST/SE transactions without ISA/GS
+        - 835/837 fragments that start directly at business segments like BPR/CLP
+        """
+        if not self.segments:
+            return []
+
+        synthetic_isa = Segment("ISA", [], "ISA*SYNTHETIC", 0)
+        synthetic_iea = Segment("IEA", [], "IEA*SYNTHETIC", 0)
+
+        # If GS exists, preserve real functional groups and wrap them in a synthetic ISA envelope.
+        if any(seg.tag == "GS" for seg in self.segments):
+            groups = self._build_groups(0, len(self.segments) - 1)
+            if groups:
+                return [
+                    Interchange(
+                        header=synthetic_isa,
+                        groups=groups,
+                        trailer=synthetic_iea,
+                        isa06_sender="",
+                        isa08_receiver="",
+                    )
+                ]
+
+        synthetic_gs = Segment("GS", [], "GS*SYNTHETIC", 0)
+        synthetic_ge = Segment("GE", [], "GE*SYNTHETIC", 0)
+
+        # If ST exists, preserve transaction boundaries and wrap them in synthetic GS/ISA envelopes.
+        if any(seg.tag == "ST" for seg in self.segments):
+            transactions = self._build_transactions(0, len(self.segments) - 1)
+            if transactions:
+                return [
+                    Interchange(
+                        header=synthetic_isa,
+                        groups=[FunctionalGroup(header=synthetic_gs, transactions=transactions, trailer=synthetic_ge)],
+                        trailer=synthetic_iea,
+                        isa06_sender="",
+                        isa08_receiver="",
+                    )
+                ]
+
+        # Final fallback: treat the entire file as a single transaction fragment.
+        set_id = self._infer_transaction_set_id(self.segments)
+        synthetic_st = Segment("ST", [Element(raw=set_id, position=1)], f"ST*{set_id}", 0)
+        synthetic_se = Segment("SE", [], "SE*SYNTHETIC", 0)
+        loops = _detect_loops(self.segments)
+        transaction = TransactionSet(
+            header=synthetic_st,
+            loops=loops,
+            trailer=synthetic_se,
+            set_id=set_id,
+        )
+        return [
+            Interchange(
+                header=synthetic_isa,
+                groups=[FunctionalGroup(header=synthetic_gs, transactions=[transaction], trailer=synthetic_ge)],
+                trailer=synthetic_iea,
+                isa06_sender="",
+                isa08_receiver="",
+            )
+        ]
 
     def _build_groups(self, start: int, end: int) -> List[FunctionalGroup]:
         groups: List[FunctionalGroup] = []
@@ -886,11 +962,41 @@ class X12Parser:
                             return raw
                     return "?"
 
-                # Support both simplified internal fixtures and richer external-style 835 CLP layouts.
-                clp_status = _first_value(3, 6)
-                clp_billed = _first_numeric(2, 5)
-                clp_paid = _first_numeric(4, 7)
-                clp_allowed = _first_numeric(5, 7)
+                # Support both standard external 835 CLP layouts and simplified internal fixtures.
+                # Standard X12 835 CLP:
+                #   CLP01 claim id, CLP02 status, CLP03 total charge, CLP04 payment, CLP05 patient resp
+                # Some older internal fixtures store billed/status in later positions.
+                clp02 = self._seg_get(clp_seg, 2)
+                clp03 = self._seg_get(clp_seg, 3)
+                clp04 = self._seg_get(clp_seg, 4)
+
+                def _is_number(raw: Optional[str]) -> bool:
+                    if raw in (None, ""):
+                        return False
+                    try:
+                        float(raw)
+                        return True
+                    except ValueError:
+                        return False
+
+                standard_clp_layout = (clp02 in _CLP_STATUS_CODES) and _is_number(clp03) and _is_number(clp04)
+                alternate_clp_layout = (clp03 in _CLP_STATUS_CODES) and _is_number(clp02)
+
+                if standard_clp_layout:
+                    clp_status = clp02 or "?"
+                    clp_billed = _first_numeric(3)
+                    clp_paid = _first_numeric(4)
+                    clp_allowed = _first_numeric(5)
+                elif alternate_clp_layout:
+                    clp_status = clp03 or "?"
+                    clp_billed = _first_numeric(2)
+                    clp_paid = _first_numeric(4)
+                    clp_allowed = _first_numeric(5)
+                else:
+                    clp_status = _first_value(6, 3, 2)
+                    clp_billed = _first_numeric(5, 3, 2)
+                    clp_paid = _first_numeric(7, 4)
+                    clp_allowed = _first_numeric(5, 7)
 
                 current_claim = {
                     "claim_id": clp_id,
@@ -925,7 +1031,7 @@ class X12Parser:
                 if current_claim is not None:
                     for seg in loop.segments:
                         if seg.tag == "CAS":
-                            grp_code = self._seg_get(seg, 2)
+                            grp_code = self._seg_get(seg, 1)
                             if grp_code:
                                 current_claim["adjustment_group_codes"].add(grp_code)
                             # CAS elements: e1=group_code, e2=reason1, e3=amount1, e4=reason2, e5=amount2...
@@ -1082,11 +1188,19 @@ class X12Parser:
         # ── BPR metadata enrichment ─────────────────────────────────────────
         bpr_payment_method = None
         bpr_account_type = None
+        bpr_payment_method_label_map = {
+            "H": "ACH",
+            "ACH": "ACH",
+            "CHK": "Check",
+            "C": "Check",
+            "NON": "Non-Payment Data",
+            "FWT": "Federal Reserve Funds/Wire Transfer",
+        }
         for loop in ts.loops:
             for seg in loop.segments:
                 if seg.tag == "BPR":
-                    bpr_payment_method = self._seg_get(seg, 1)   # C=check, H=ACH, etc.
-                    bpr_account_type = self._seg_get(seg, 15)   # checking/savings
+                    bpr_payment_method = self._seg_get(seg, 4) or self._seg_get(seg, 1)
+                    bpr_account_type = self._seg_get(seg, 15) or self._seg_get(seg, 8)
                     break
 
         # ── Enrich claim records with status descriptions ───────────────────
@@ -1155,7 +1269,7 @@ class X12Parser:
             cas_by_group: dict[str, float] = {}
             for seg in sum([l.segments for l in ts.loops if l.leader_tag == "CAS"], []):
                 if seg.tag == "CAS":
-                    grp = self._seg_get(seg, 2) or "?"
+                    grp = self._seg_get(seg, 1) or "?"
                     for e_idx in range(3, min(len(seg.elements) + 1, 19), 2):
                         raw = self._seg_get(seg, e_idx)
                         if raw:
@@ -1205,7 +1319,7 @@ class X12Parser:
             "provider_name": provider_name,
             # Enrichment
             "bpr_payment_method": bpr_payment_method,
-            "bpr_payment_method_label": {"C": "Check", "H": "ACH"}.get(bpr_payment_method),
+            "bpr_payment_method_label": bpr_payment_method_label_map.get(bpr_payment_method),
             "bpr_account_type": bpr_account_type,
             # Reconciliation helpers
             "balancing_summary": balancing_summary,

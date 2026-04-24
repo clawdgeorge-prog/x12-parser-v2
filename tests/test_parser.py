@@ -823,15 +823,14 @@ class Test835Enrichment:
         ts = data["interchanges"][0]["functional_groups"][0]["transactions"][0]
         summary = ts["summary"]
         assert "bpr_payment_method" in summary
-        # sample_835.edi has BPR*H (ACH)
-        assert summary["bpr_payment_method"] == "H"
+        assert summary["bpr_payment_method"] == "ACH"
 
     def test_bpr_payment_method_label(self):
         fixture = FIXTURES / "sample_835.edi"
         data = X12Parser.from_file(fixture).to_dict()
         ts = data["interchanges"][0]["functional_groups"][0]["transactions"][0]
         summary = ts["summary"]
-        assert summary["bpr_payment_method"] == "H"
+        assert summary["bpr_payment_method"] == "ACH"
         assert summary["bpr_payment_method_label"] == "ACH"
 
     def test_clp_status_labels(self):
@@ -844,6 +843,32 @@ class Test835Enrichment:
             assert "status_category" in cl
             assert cl["status_label"] != ""
             assert cl["status_category"] in {"paid", "pended", "denied", "forwarded", "informational", "unknown"}
+
+    def test_standard_external_clp_layout_uses_clp02_clp03_clp04(self):
+        text = (
+            "ISA*00*          *00*          *ZZ*SENDER         *ZZ*RECEIVER       *250101*1200*^*00501*000000001*0*P*>~\n"
+            "GS*HP*SENDER*RECEIVER*20250101*1200*1*X*005010X221A1~\n"
+            "ST*835*0001~\n"
+            "BPR*I*3859.17*C*ACH*CCP*01*124384877*DA*720000034*1362739571*000036273*01*322172797*DA*10100019017129*20250128~\n"
+            "TRN*1*11194419403*1362739571*000036273~\n"
+            "N1*PR*TEST PAYER~\n"
+            "N1*PE*TEST PROVIDER~\n"
+            "LX*1~\n"
+            "CLP*100V100*2*147*29.4**15*200*72~\n"
+            "SVC*HC>99213>CG*147*29.4**0~\n"
+            "CAS*OA*23*117.6~\n"
+            "SE*11*0001~\n"
+            "GE*1*1~\n"
+            "IEA*1*000000001~\n"
+        )
+        data = X12Parser(text).to_dict()
+        ts = data["interchanges"][0]["functional_groups"][0]["transactions"][0]
+        claim = ts["summary"]["claims"][0]
+        assert claim["status_code"] == "2"
+        assert claim["status_label"] == "Processed as Secondary"
+        assert claim["clp_billed"] == 147.0
+        assert claim["clp_paid"] == 29.4
+        assert {c["code"] for c in claim["adjustment_group_codes"]} == {"OA"}
 
     def test_discrepancy_fixture_detects_billed_mismatch(self):
         """sample_835_discrepancy.edi: CLP billed=1000, SVC billed=250 → mismatch."""

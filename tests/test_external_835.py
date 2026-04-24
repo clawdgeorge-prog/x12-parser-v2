@@ -65,10 +65,12 @@ class TestJobisezExternal835:
         return "external-test-files/jobisez_sample_835.edi"
 
     def test_bare_transaction_set_handled(self, jobisez_835_path):
-        """Bare transaction set without ISA/GS should return empty interchanges."""
+        """Bare transaction set without ISA/GS should still be wrapped and summarized."""
         with open(jobisez_835_path) as f:
             content = f.read()
         result = parse(content)
         d = result.to_dict()
-        # No envelope means no interchanges - this is expected behavior
-        assert len(d["interchanges"]) == 0
+        assert len(d["interchanges"]) == 1
+        ts = d["interchanges"][0]["functional_groups"][0]["transactions"][0]
+        assert ts["set_id"] == "835"
+        assert "summary" in ts
