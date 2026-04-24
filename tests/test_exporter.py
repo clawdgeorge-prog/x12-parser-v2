@@ -54,6 +54,30 @@ class TestCSVExport:
             assert "claim_id" in header
             assert "clp_billed" in header
             assert "svc_billed" in header
+            assert "patient_first_name" in header
+            assert "trn_trace_number" in header
+            assert "service_procedure_codes" in header
+
+    def test_835_claim_csv_includes_richer_segment_fields(self):
+        data = _parse_fixture("sample_835.edi")
+        with tempfile.TemporaryDirectory() as tmp:
+            out = pathlib.Path(tmp)
+            exporter.write_csv(data, out)
+            with open(out / "claims_835.csv", newline="") as f:
+                rows = list(csv.DictReader(f))
+
+        row = next(r for r in rows if r["claim_id"] == "CLP001")
+        assert row["trn_trace_number"] == "0000000001"
+        assert row["payer_address_line1"] == "123 MAIN STREET"
+        assert row["provider_address_line1"] == "456 ELM ROAD"
+        assert row["patient_last_name"] == "SMITH"
+        assert row["patient_first_name"] == "JOHN"
+        assert row["patient_id"] == "CLP001"
+        assert row["service_qualifiers"] == "HC"
+        assert row["service_procedure_codes"] == "99213"
+        assert row["service_line_charge_amounts"] == "250.00"
+        assert row["service_line_paid_amounts"] == "150.00"
+        assert row["cas_reason_codes"] == "45|45|1"
 
     def test_service_lines_extracted(self):
         data = _parse_fixture("sample_835.edi")

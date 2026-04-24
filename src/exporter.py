@@ -46,6 +46,17 @@ def _fmt_money(v: Any) -> str:
     except (TypeError, ValueError):
         return ""
 
+
+def _join_values(values: list[Any], sep: str = "|") -> str:
+    return sep.join(str(v) for v in values if v not in (None, ""))
+
+
+def _split_composite(value: str) -> list[str]:
+    if not value:
+        return []
+    normalized = value.replace(">", ":")
+    return [part for part in normalized.split(":") if part != ""]
+
 def _iter_documents(data: dict) -> Iterator[dict]:
     if data.get("batch"):
         yield from data.get("documents", [])
@@ -78,8 +89,28 @@ def _build_835_claim_records(data: dict) -> Iterator[dict]:
                     payment_amount = _fmt_money(summary.get("payment_amount"))
                     check_trace = _safe(summary.get("check_trace", ""))
                     bpr_method = _safe(summary.get("bpr_payment_method", ""))
-                    for claim in summary.get("claims", []):
-                        yield {
+                    summary_claims = summary.get("claims", [])
+                    summary_by_claim_id: dict[str, list[dict]] = {}
+                    for claim in summary_claims:
+                        summary_by_claim_id.setdefault(_safe(claim.get("claim_id", "")), []).append(claim)
+
+                    bpr = {}
+                    trn = {}
+                    header_refs: dict[str, str] = {}
+                    header_dtms: dict[str, str] = {}
+                    payer_ctx: dict[str, str] = {}
+                    payee_ctx: dict[str, str] = {}
+                    payer_contacts: dict[str, dict[str, str]] = {}
+                    current_entity = ""
+                    current_lx = ""
+                    current_claim: dict[str, Any] | None = None
+
+                    def _new_claim_row(claim_id: str) -> dict[str, Any]:
+                        claim_summary = {}
+                        queue = summary_by_claim_id.get(claim_id, [])
+                        if queue:
+                            claim_summary = queue.pop(0)
+                        return {
                             "source_file": source_file,
                             "source_path": source_path,
                             "interchange_ctrl": ic_ctrl,
@@ -89,29 +120,281 @@ def _build_835_claim_records(data: dict) -> Iterator[dict]:
                             "gs_version": gs_version,
                             "st_ctrl": st_ctrl,
                             "transaction_type": "835",
-                            "claim_id": _safe(claim.get("claim_id", "")),
-                            "status_code": _safe(claim.get("status_code", "")),
-                            "status_label": _safe(claim.get("status_label", "")),
-                            "status_category": _safe(claim.get("status_category", "")),
-                            "patient_name": _safe(claim.get("patient_name", "")),
-                            "clp_billed": _fmt_money(claim.get("clp_billed")),
-                            "clp_allowed": _fmt_money(claim.get("clp_allowed")),
-                            "clp_paid": _fmt_money(claim.get("clp_paid")),
-                            "clp_adjustment": _fmt_money(claim.get("clp_adjustment")),
-                            "svc_billed": _fmt_money(claim.get("svc_billed")),
-                            "svc_paid": _fmt_money(claim.get("svc_paid")),
-                            "service_line_count": _safe(claim.get("service_line_count", "")),
-                            "has_billed_discrepancy": str(claim.get("has_billed_discrepancy", False)),
-                            "has_paid_discrepancy": str(claim.get("has_paid_discrepancy", False)),
-                            "adjustment_group_codes": _safe(
-                                ",".join(c.get("code", "") for c in claim.get("adjustment_group_codes", []))
-                            ),
+                            "claim_id": claim_id,
+                            "status_code": _safe(claim_summary.get("status_code", "")),
+                            "status_label": _safe(claim_summary.get("status_label", "")),
+                            "status_category": _safe(claim_summary.get("status_category", "")),
+                            "patient_name": _safe(claim_summary.get("patient_name", "")),
+                            "clp_billed": _fmt_money(claim_summary.get("clp_billed")),
+                            "clp_allowed": _fmt_money(claim_summary.get("clp_allowed")),
+                            "clp_paid": _fmt_money(claim_summary.get("clp_paid")),
+                            "clp_adjustment": _fmt_money(claim_summary.get("clp_adjustment")),
+                            "svc_billed": _fmt_money(claim_summary.get("svc_billed")),
+                            "svc_paid": _fmt_money(claim_summary.get("svc_paid")),
+                            "service_line_count": _safe(claim_summary.get("service_line_count", "")),
+                            "has_billed_discrepancy": str(claim_summary.get("has_billed_discrepancy", False)),
+                            "has_paid_discrepancy": str(claim_summary.get("has_paid_discrepancy", False)),
+                            "adjustment_group_codes": _safe(",".join(c.get("code", "") for c in claim_summary.get("adjustment_group_codes", []))),
                             "payer_name": payer,
                             "provider_name": provider,
                             "payment_amount": payment_amount,
                             "check_trace": check_trace,
+                            "bpr_handling_code": "",
+                            "bpr_credit_debit_flag": "",
                             "bpr_payment_method": bpr_method,
+                            "bpr_payment_format": "",
+                            "bpr_sender_dfi_qualifier": "",
+                            "bpr_sender_dfi_id": "",
+                            "bpr_sender_account_qualifier": "",
+                            "bpr_sender_account_number": "",
+                            "bpr_payer_identifier": "",
+                            "bpr_payer_supplemental_code": "",
+                            "bpr_receiver_dfi_qualifier": "",
+                            "bpr_receiver_bank_id": "",
+                            "bpr_receiver_account_qualifier": "",
+                            "bpr_receiver_account_number": "",
+                            "bpr_effective_date": "",
+                            "trn_trace_type": "",
+                            "trn_trace_number": "",
+                            "trn_payer_identifier": "",
+                            "trn_additional_identifier": "",
+                            "header_ref_ev": "",
+                            "header_ref_f2": "",
+                            "production_date": "",
+                            "payer_id_qualifier": "",
+                            "payer_id": "",
+                            "payer_address_line1": "",
+                            "payer_city": "",
+                            "payer_state": "",
+                            "payer_zip": "",
+                            "payer_country": "",
+                            "payer_contact_cx_name": "",
+                            "payer_contact_cx_phone": "",
+                            "payer_contact_bl_name": "",
+                            "payer_contact_bl_phone": "",
+                            "provider_id_qualifier": "",
+                            "provider_id": "",
+                            "provider_address_line1": "",
+                            "provider_city": "",
+                            "provider_state": "",
+                            "provider_zip": "",
+                            "provider_tax_id": "",
+                            "lx_number": current_lx,
+                            "clp_patient_responsibility": "",
+                            "clp_filing_indicator": "",
+                            "clp_payer_claim_control": "",
+                            "clp_facility_code": "",
+                            "patient_entity_type": "",
+                            "patient_last_name": "",
+                            "patient_first_name": "",
+                            "patient_middle_name": "",
+                            "patient_id_qualifier": "",
+                            "patient_id": "",
+                            "rendering_entity_type": "",
+                            "rendering_last_org_name": "",
+                            "rendering_first_name": "",
+                            "rendering_middle_name": "",
+                            "rendering_id_qualifier": "",
+                            "rendering_id": "",
+                            "claim_statement_from_date": "",
+                            "claim_received_date": "",
+                            "claim_date_001": "",
+                            "claim_amt_au": "",
+                            "service_qualifiers": [],
+                            "service_procedure_codes": [],
+                            "service_modifiers": [],
+                            "service_line_charge_amounts": [],
+                            "service_line_paid_amounts": [],
+                            "service_line_units": [],
+                            "service_dates": [],
+                            "service_ref_6r_values": [],
+                            "service_amt_b6_values": [],
+                            "cas_reason_codes": [],
+                            "cas_amounts": [],
                         }
+
+                    def _finalize_claim_row(row: dict[str, Any]) -> dict[str, Any]:
+                        row["bpr_handling_code"] = _safe(bpr.get("e1", ""))
+                        row["bpr_credit_debit_flag"] = _safe(bpr.get("e3", ""))
+                        row["bpr_payment_format"] = _safe(bpr.get("e5", ""))
+                        row["bpr_sender_dfi_qualifier"] = _safe(bpr.get("e6", ""))
+                        row["bpr_sender_dfi_id"] = _safe(bpr.get("e7", ""))
+                        row["bpr_sender_account_qualifier"] = _safe(bpr.get("e8", ""))
+                        row["bpr_sender_account_number"] = _safe(bpr.get("e9", ""))
+                        row["bpr_payer_identifier"] = _safe(bpr.get("e10", ""))
+                        row["bpr_payer_supplemental_code"] = _safe(bpr.get("e11", ""))
+                        row["bpr_receiver_dfi_qualifier"] = _safe(bpr.get("e12", ""))
+                        row["bpr_receiver_bank_id"] = _safe(bpr.get("e13", ""))
+                        row["bpr_receiver_account_qualifier"] = _safe(bpr.get("e14", ""))
+                        row["bpr_receiver_account_number"] = _safe(bpr.get("e15", ""))
+                        row["bpr_effective_date"] = _safe(bpr.get("e16", ""))
+                        row["trn_trace_type"] = _safe(trn.get("e1", ""))
+                        row["trn_trace_number"] = _safe(trn.get("e2", ""))
+                        row["trn_payer_identifier"] = _safe(trn.get("e3", ""))
+                        row["trn_additional_identifier"] = _safe(trn.get("e4", ""))
+                        row["header_ref_ev"] = _safe(header_refs.get("EV", ""))
+                        row["header_ref_f2"] = _safe(header_refs.get("F2", ""))
+                        row["production_date"] = _safe(header_dtms.get("405", ""))
+                        row["payer_id_qualifier"] = _safe(payer_ctx.get("id_qualifier", ""))
+                        row["payer_id"] = _safe(payer_ctx.get("id", payer_ctx.get("ref_2u", "")))
+                        row["payer_address_line1"] = _safe(payer_ctx.get("address1", ""))
+                        row["payer_city"] = _safe(payer_ctx.get("city", ""))
+                        row["payer_state"] = _safe(payer_ctx.get("state", ""))
+                        row["payer_zip"] = _safe(payer_ctx.get("zip", ""))
+                        row["payer_country"] = _safe(payer_ctx.get("country", ""))
+                        row["payer_contact_cx_name"] = _safe(payer_contacts.get("CX", {}).get("name", ""))
+                        row["payer_contact_cx_phone"] = _safe(payer_contacts.get("CX", {}).get("value", ""))
+                        row["payer_contact_bl_name"] = _safe(payer_contacts.get("BL", {}).get("name", ""))
+                        row["payer_contact_bl_phone"] = _safe(payer_contacts.get("BL", {}).get("value", ""))
+                        row["provider_id_qualifier"] = _safe(payee_ctx.get("id_qualifier", ""))
+                        row["provider_id"] = _safe(payee_ctx.get("id", ""))
+                        row["provider_address_line1"] = _safe(payee_ctx.get("address1", ""))
+                        row["provider_city"] = _safe(payee_ctx.get("city", ""))
+                        row["provider_state"] = _safe(payee_ctx.get("state", ""))
+                        row["provider_zip"] = _safe(payee_ctx.get("zip", ""))
+                        row["provider_tax_id"] = _safe(payee_ctx.get("ref_tj", ""))
+                        row["service_qualifiers"] = _join_values(row["service_qualifiers"])
+                        row["service_procedure_codes"] = _join_values(row["service_procedure_codes"])
+                        row["service_modifiers"] = _join_values(row["service_modifiers"])
+                        row["service_line_charge_amounts"] = _join_values(row["service_line_charge_amounts"])
+                        row["service_line_paid_amounts"] = _join_values(row["service_line_paid_amounts"])
+                        row["service_line_units"] = _join_values(row["service_line_units"])
+                        row["service_dates"] = _join_values(row["service_dates"])
+                        row["service_ref_6r_values"] = _join_values(row["service_ref_6r_values"])
+                        row["service_amt_b6_values"] = _join_values(row["service_amt_b6_values"])
+                        row["cas_reason_codes"] = _join_values(row["cas_reason_codes"])
+                        row["cas_amounts"] = _join_values(row["cas_amounts"])
+                        return row
+
+                    for loop in ts.get("loops", []):
+                        for seg in loop.get("segments", []):
+                            elements = seg.get("elements", {})
+                            tag = seg.get("tag", "")
+
+                            if tag == "BPR":
+                                bpr = elements
+                            elif tag == "TRN":
+                                trn = elements
+                            elif tag == "REF":
+                                qual = _safe(elements.get("e1", ""))
+                                value = _safe(elements.get("e2", ""))
+                                if current_claim is not None and qual == "6R":
+                                    current_claim["service_ref_6r_values"].append(value)
+                                elif current_claim is None and current_entity == "PR":
+                                    payer_ctx[f"ref_{qual.lower()}"] = value
+                                elif current_claim is None and current_entity == "PE":
+                                    payee_ctx[f"ref_{qual.lower()}"] = value
+                                elif current_claim is None:
+                                    header_refs[qual] = value
+                            elif tag == "DTM":
+                                qual = _safe(elements.get("e1", ""))
+                                value = _safe(elements.get("e2", ""))
+                                if current_claim is None:
+                                    header_dtms[qual] = value
+                                else:
+                                    if qual == "232":
+                                        current_claim["claim_statement_from_date"] = value
+                                    elif qual == "050":
+                                        current_claim["claim_received_date"] = value
+                                    elif qual == "001":
+                                        current_claim["claim_date_001"] = value
+                                    elif qual == "472":
+                                        current_claim["service_dates"].append(value)
+                            elif tag == "DTP" and current_claim is not None:
+                                qual = _safe(elements.get("e1", ""))
+                                value = _safe(elements.get("e3", elements.get("e2", "")))
+                                if qual == "472":
+                                    current_claim["service_dates"].append(value)
+                                elif qual == "001":
+                                    current_claim["claim_date_001"] = value
+                            elif tag == "N1":
+                                current_entity = _safe(elements.get("e1", ""))
+                                if current_entity == "PR":
+                                    payer_ctx["name"] = _safe(elements.get("e2", ""))
+                                    payer_ctx["id_qualifier"] = _safe(elements.get("e3", ""))
+                                    payer_ctx["id"] = _safe(elements.get("e4", ""))
+                                elif current_entity == "PE":
+                                    payee_ctx["name"] = _safe(elements.get("e2", ""))
+                                    payee_ctx["id_qualifier"] = _safe(elements.get("e3", ""))
+                                    payee_ctx["id"] = _safe(elements.get("e4", ""))
+                            elif tag == "N3":
+                                if current_entity == "PR":
+                                    payer_ctx["address1"] = _safe(elements.get("e1", ""))
+                                elif current_entity == "PE":
+                                    payee_ctx["address1"] = _safe(elements.get("e1", ""))
+                            elif tag == "N4":
+                                target = payer_ctx if current_entity == "PR" else payee_ctx if current_entity == "PE" else None
+                                if target is not None:
+                                    target["city"] = _safe(elements.get("e1", ""))
+                                    target["state"] = _safe(elements.get("e2", ""))
+                                    target["zip"] = _safe(elements.get("e3", ""))
+                                    target["country"] = _safe(elements.get("e4", ""))
+                            elif tag == "PER":
+                                if current_entity == "PR":
+                                    payer_contacts[_safe(elements.get("e1", ""))] = {
+                                        "name": _safe(elements.get("e2", "")),
+                                        "comm_type": _safe(elements.get("e3", "")),
+                                        "value": _safe(elements.get("e4", "")),
+                                    }
+                            elif tag == "LX":
+                                current_lx = _safe(elements.get("e1", ""))
+                            elif tag == "CLP":
+                                if current_claim is not None:
+                                    yield _finalize_claim_row(current_claim)
+                                current_entity = ""
+                                current_claim = _new_claim_row(_safe(elements.get("e1", "")))
+                                current_claim["lx_number"] = current_lx
+                                current_claim["status_code"] = _safe(elements.get("e2", current_claim.get("status_code", ""))) or _safe(current_claim.get("status_code", ""))
+                                current_claim["clp_billed"] = _fmt_money(elements.get("e3", current_claim.get("clp_billed", ""))) or _safe(current_claim.get("clp_billed", ""))
+                                current_claim["clp_paid"] = _fmt_money(elements.get("e4", current_claim.get("clp_paid", ""))) or _safe(current_claim.get("clp_paid", ""))
+                                current_claim["clp_patient_responsibility"] = _fmt_money(elements.get("e5", ""))
+                                current_claim["clp_filing_indicator"] = _safe(elements.get("e6", ""))
+                                current_claim["clp_payer_claim_control"] = _safe(elements.get("e7", ""))
+                                current_claim["clp_facility_code"] = _safe(elements.get("e8", ""))
+                            elif tag == "NM1" and current_claim is not None:
+                                entity_code = _safe(elements.get("e1", ""))
+                                if entity_code == "QC":
+                                    current_claim["patient_entity_type"] = _safe(elements.get("e2", ""))
+                                    current_claim["patient_last_name"] = _safe(elements.get("e3", ""))
+                                    current_claim["patient_first_name"] = _safe(elements.get("e4", ""))
+                                    current_claim["patient_middle_name"] = _safe(elements.get("e5", ""))
+                                    current_claim["patient_id_qualifier"] = _safe(elements.get("e8", ""))
+                                    current_claim["patient_id"] = _safe(elements.get("e9", ""))
+                                elif entity_code == "82":
+                                    current_claim["rendering_entity_type"] = _safe(elements.get("e2", ""))
+                                    current_claim["rendering_last_org_name"] = _safe(elements.get("e3", ""))
+                                    current_claim["rendering_first_name"] = _safe(elements.get("e4", ""))
+                                    current_claim["rendering_middle_name"] = _safe(elements.get("e5", ""))
+                                    current_claim["rendering_id_qualifier"] = _safe(elements.get("e8", ""))
+                                    current_claim["rendering_id"] = _safe(elements.get("e9", ""))
+                            elif tag == "AMT" and current_claim is not None:
+                                qual = _safe(elements.get("e1", ""))
+                                value = _fmt_money(elements.get("e2", ""))
+                                if qual == "AU":
+                                    current_claim["claim_amt_au"] = value
+                                elif qual == "B6":
+                                    current_claim["service_amt_b6_values"].append(value)
+                            elif tag == "SVC" and current_claim is not None:
+                                parts = _split_composite(_safe(elements.get("e1", "")))
+                                current_claim["service_qualifiers"].append(parts[0] if len(parts) >= 1 else "")
+                                current_claim["service_procedure_codes"].append(parts[1] if len(parts) >= 2 else _safe(elements.get("e1", "")))
+                                current_claim["service_modifiers"].append(":".join(parts[2:]) if len(parts) > 2 else "")
+                                current_claim["service_line_charge_amounts"].append(_fmt_money(elements.get("e2", "")))
+                                current_claim["service_line_paid_amounts"].append(_fmt_money(elements.get("e3", "")))
+                                current_claim["service_line_units"].append(_safe(elements.get("e5", "")))
+                            elif tag == "CAS" and current_claim is not None:
+                                idx = 2
+                                while True:
+                                    reason = elements.get(f"e{idx}")
+                                    amount = elements.get(f"e{idx+1}")
+                                    if reason in (None, ""):
+                                        break
+                                    current_claim["cas_reason_codes"].append(_safe(reason))
+                                    current_claim["cas_amounts"].append(_fmt_money(amount))
+                                    idx += 3
+
+                    if current_claim is not None:
+                        yield _finalize_claim_row(current_claim)
 
 
 def _build_837_claim_records(data: dict) -> Iterator[dict]:
@@ -363,7 +646,24 @@ CSV_CLAIMS_835_FIELDS = [
     "status_category", "patient_name", "clp_billed", "clp_allowed", "clp_paid",
     "clp_adjustment", "svc_billed", "svc_paid", "service_line_count",
     "has_billed_discrepancy", "has_paid_discrepancy", "adjustment_group_codes",
-    "payer_name", "provider_name", "payment_amount", "check_trace", "bpr_payment_method",
+    "payer_name", "provider_name", "payment_amount", "check_trace",
+    "bpr_handling_code", "bpr_credit_debit_flag", "bpr_payment_method", "bpr_payment_format",
+    "bpr_sender_dfi_qualifier", "bpr_sender_dfi_id", "bpr_sender_account_qualifier", "bpr_sender_account_number",
+    "bpr_payer_identifier", "bpr_payer_supplemental_code", "bpr_receiver_dfi_qualifier", "bpr_receiver_bank_id",
+    "bpr_receiver_account_qualifier", "bpr_receiver_account_number", "bpr_effective_date",
+    "trn_trace_type", "trn_trace_number", "trn_payer_identifier", "trn_additional_identifier",
+    "header_ref_ev", "header_ref_f2", "production_date",
+    "payer_id_qualifier", "payer_id", "payer_address_line1", "payer_city", "payer_state", "payer_zip", "payer_country",
+    "payer_contact_cx_name", "payer_contact_cx_phone", "payer_contact_bl_name", "payer_contact_bl_phone",
+    "provider_id_qualifier", "provider_id", "provider_address_line1", "provider_city", "provider_state", "provider_zip", "provider_tax_id",
+    "lx_number",
+    "clp_patient_responsibility", "clp_filing_indicator", "clp_payer_claim_control", "clp_facility_code",
+    "patient_entity_type", "patient_last_name", "patient_first_name", "patient_middle_name", "patient_id_qualifier", "patient_id",
+    "rendering_entity_type", "rendering_last_org_name", "rendering_first_name", "rendering_middle_name", "rendering_id_qualifier", "rendering_id",
+    "claim_statement_from_date", "claim_received_date", "claim_date_001", "claim_amt_au",
+    "service_qualifiers", "service_procedure_codes", "service_modifiers", "service_line_charge_amounts", "service_line_paid_amounts",
+    "service_line_units", "service_dates", "service_ref_6r_values", "service_amt_b6_values",
+    "cas_reason_codes", "cas_amounts",
 ]
 
 CSV_CLAIMS_837_FIELDS = [
