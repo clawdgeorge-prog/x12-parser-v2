@@ -7,8 +7,8 @@ from src.reconcile import _match_reason, read_reference_claims_csv
 
 
 def test_component_separator_is_respected():
-    seg = X12SegmentParser(elem_sep='*', comp_sep='>').parse('SVC*HC>99213*100*80', 1)
-    parser = X12SegmentParser(elem_sep='*', comp_sep='>')
+    seg = X12SegmentParser(elem_sep='*', rep_sep='^', comp_sep='>').parse('SVC*HC>99213*100*80', 1)
+    parser = X12SegmentParser(elem_sep='*', rep_sep='^', comp_sep='>')
     assert parser.get(seg, 1, 2) == '99213'
 
 

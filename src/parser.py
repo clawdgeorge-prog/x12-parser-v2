@@ -163,9 +163,11 @@ class X12SegmentParser:
         self,
         elem_sep: str = DEFAULT_ELEM_SEP,
         rep_sep: str = "^",
+        comp_sep: str = ":",
     ):
         self.elem_sep = elem_sep
         self.rep_sep = rep_sep
+        self.comp_sep = comp_sep
 
     def parse(self, raw: str, position: int = 0) -> Segment:
         parts = raw.split(self.elem_sep)
@@ -188,7 +190,7 @@ class X12SegmentParser:
         e = seg.elements[idx].raw
         if sub_index is not None:
             # Split by component separator first, then by repetition separator
-            comp_parts = e.split(":")
+            comp_parts = e.split(self.comp_sep)
             if sub_index <= len(comp_parts):
                 comp_val = comp_parts[sub_index - 1]
                 # Split the composite sub-element by repetition separator

@@ -277,7 +277,7 @@ class TestLargeFileCsvExport:
         """Verify write_csv does not crash on large parsed data."""
         counts = write_csv(large_835_parsed, _tmp_export_dir / "csv")
         assert counts is not None
-        assert len(counts) == 4  # claims_835, claims_837, service_lines, entities
+        assert len(counts) == 5  # claims_835, claims_837, service_lines, entities, batch_summary
 
     def test_csv_claims_count(self, large_835_parsed, _tmp_export_dir):
         """Verify exactly 1000 claim rows were written."""
