@@ -1,7 +1,7 @@
 """
 X12 Parser — Healthcare EDI 835/837 transactions.
 
-Scope (v0.2.1):
+Scope (v0.2.2):
   - ISA/IEA envelope parsing with **dynamic delimiter extraction**
   - GS/GE functional-group envelope
   - ST/SE transaction set framing
@@ -16,12 +16,11 @@ Scope (v0.2.1):
 Known limitations (documented in README):
   - No schema validation against official X12 specs
   - Composite elements returned as strings (not decomposed)
-  - Repetition separator (ISA-11) extracted but not used for segment parsing
 """
 
 from __future__ import annotations
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 OUTPUT_SCHEMA_VERSION = "1.0"
 
 import re
@@ -50,6 +49,13 @@ from src.taxonomy import (
 DEFAULT_SEG_TERM = "~"
 DEFAULT_ELEM_SEP = "*"
 DEFAULT_COMP_SEP = ":"
+
+_MONEY_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
+_CLP_STATUS_RE = re.compile(r"^(?:[1-9]|1\d|2\d)$")
+_CAS_GROUP_RE = re.compile(r"^[A-Z]{2,3}$")
+_CAS_REASON_RE = re.compile(r"^[A-Z0-9]{1,5}$")
+_SVC_CODE_RE = re.compile(r"^[A-Z0-9:><-]+$")
+_REPAIRABLE_SHIFT_TAGS = {"CLP", "CAS", "SVC"}
 
 
 # ── Dataclasses ───────────────────────────────────────────────────────────────
@@ -99,6 +105,19 @@ class Interchange:
     isa08_receiver: str = ""
 
 
+@dataclass
+class SegmentRepairEvent:
+    position: int
+    tag: str
+    action: str
+    confidence: str
+    score_before: int
+    score_after: int
+    note: str
+    original_raw: str
+    repaired_raw: str
+
+
 # ── Core tokenizer ─────────────────────────────────────────────────────────────
 
 class X12Tokenizer:
@@ -140,9 +159,13 @@ class X12Tokenizer:
 class X12SegmentParser:
     """Parse a single raw segment string into a Segment dataclass."""
 
-    def __init__(self, elem_sep: str = DEFAULT_ELEM_SEP, comp_sep: str = DEFAULT_COMP_SEP):
+    def __init__(
+        self,
+        elem_sep: str = DEFAULT_ELEM_SEP,
+        rep_sep: str = "^",
+    ):
         self.elem_sep = elem_sep
-        self.comp_sep = comp_sep
+        self.rep_sep = rep_sep
 
     def parse(self, raw: str, position: int = 0) -> Segment:
         parts = raw.split(self.elem_sep)
@@ -154,16 +177,39 @@ class X12SegmentParser:
         return Segment(tag=tag, elements=elements, raw=raw, position=position)
 
     def get(self, seg: Segment, index: int, sub_index: Optional[int] = None) -> Optional[str]:
-        """Get element value by 1-based index. Optionally sub-element by 2nd index."""
+        """Get element value by 1-based index. Optionally sub-element by 2nd index.
+
+        When sub_index is provided, splits first by component separator (':'), then by
+        repetition separator ('^') to handle repeated composite elements.
+        """
         idx = index - 1
         if idx < 0 or idx >= len(seg.elements):
             return None
         e = seg.elements[idx].raw
         if sub_index is not None:
-            parts = e.split(self.comp_sep)
-            si = sub_index - 1
-            return parts[si] if si < len(parts) else None
+            # Split by component separator first, then by repetition separator
+            comp_parts = e.split(":")
+            if sub_index <= len(comp_parts):
+                comp_val = comp_parts[sub_index - 1]
+                # Split the composite sub-element by repetition separator
+                rep_parts = comp_val.split(self.rep_sep)
+                return rep_parts[0] if rep_parts else comp_val
+            return None
         return e
+
+    def get_repeated(self, seg: Segment, index: int) -> List[str]:
+        """Get all repeated element values for a given element index.
+
+        Splits the element value by the repetition separator and returns
+        all occurrences as a list. Used for elements that can repeat
+        within a single field (e.g., multiple diagnosis codes in HI).
+        """
+        idx = index - 1
+        if idx < 0 or idx >= len(seg.elements):
+            return []
+        e = seg.elements[idx].raw
+        # Split by repetition separator
+        return [p for p in e.split(self.rep_sep) if p]
 
 
 # ── 835-aware parser ─────────────────────────────────────────────────────────
@@ -503,7 +549,13 @@ def _detect_loops(segments: List[Segment]) -> List[Loop]:
 def _segment_to_dict(seg: Segment) -> dict:
     elems = {}
     for e in seg.elements:
-        elems[f"e{e.position}"] = e.raw
+        key = f"e{e.position}"
+        elems[key] = e.raw
+        # Detect composite elements (contain ':') and decompose into sub-fields
+        if ":" in e.raw:
+            parts = e.raw.split(":")
+            for sub_idx, part in enumerate(parts, start=1):
+                elems[f"{key}_sub{sub_idx}"] = part
     return {
         "tag": seg.tag,
         "elements": elems,
@@ -532,19 +584,20 @@ class X12Parser:
     Supports ISA/IEA, GS/GE, ST/SE envelopes and transaction sets 835 and 837.
     """
 
-    def __init__(self, text: Optional[str] = None):
+    def __init__(self, text: Optional[str] = None, enable_segment_repairs: bool = True):
         self._raw_text = text or ""
+        self.enable_segment_repairs = enable_segment_repairs
         self.segments: List[Segment] = []
         self.interchanges: List[Interchange] = []
         self._seg_parser = X12SegmentParser()
-        self.warnings: List[dict] = []
         self._parsed = False
         self._summary_computed = False
+        self.segment_repairs: List[SegmentRepairEvent] = []
 
     @classmethod
-    def from_file(cls, path: str | pathlib.Path) -> "X12Parser":
+    def from_file(cls, path: str | pathlib.Path, enable_segment_repairs: bool = True) -> "X12Parser":
         text = pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
-        return cls(text=text)
+        return cls(text=text, enable_segment_repairs=enable_segment_repairs)
 
     def _detect_delimiters(self, text: str) -> tuple[str, str, str, str]:
         """Detect delimiters from ISA segment.
@@ -594,14 +647,139 @@ class X12Parser:
                 rep = parts[11].strip()
                 if rep and len(rep) == 1:
                     rep_sep = rep
-        except (AttributeError, IndexError, ValueError) as exc:
-            self.warnings.append({
-                "type": "delimiter_detection_warning",
-                "message": str(exc),
-                "context": "ISA repetition separator detection",
-            })
+        except Exception:
+            pass  # keep default
         
         return elem_sep, comp_sep, rep_sep, seg_term
+
+    @staticmethod
+    def _is_money(value: str) -> bool:
+        return bool(value) and bool(_MONEY_RE.fullmatch(value))
+
+    @staticmethod
+    def _score_clp(elements: list[str]) -> int:
+        if len(elements) < 4:
+            return -4
+        score = 0
+        claim_id = elements[0].strip()
+        status = elements[1].strip()
+        billed = elements[2].strip()
+        paid = elements[3].strip()
+        if claim_id:
+            score += 1
+        if _CLP_STATUS_RE.fullmatch(status):
+            score += 4
+        else:
+            score -= 2
+        score += 3 if X12Parser._is_money(billed) else -2
+        score += 3 if X12Parser._is_money(paid) else -2
+        if len(elements) > 4 and elements[4].strip():
+            score += 1 if X12Parser._is_money(elements[4].strip()) else -1
+        return score
+
+    @staticmethod
+    def _score_cas(elements: list[str]) -> int:
+        if len(elements) < 3:
+            return -4
+        score = 0
+        group = elements[0].strip()
+        reason = elements[1].strip() if len(elements) > 1 else ""
+        amount = elements[2].strip() if len(elements) > 2 else ""
+        qty = elements[3].strip() if len(elements) > 3 else ""
+
+        score += 4 if _CAS_GROUP_RE.fullmatch(group) else -2
+        score += 3 if _CAS_REASON_RE.fullmatch(reason) else -4
+        score += 3 if X12Parser._is_money(amount) else -4
+        if qty:
+            score += 1 if X12Parser._is_money(qty) else -1
+        if any(e == "" for e in elements[:3]):
+            score -= 3
+        return score
+
+    @staticmethod
+    def _score_svc(elements: list[str]) -> int:
+        if len(elements) < 3:
+            return -4
+        score = 0
+        code = elements[0].strip()
+        billed = elements[1].strip()
+        paid = elements[2].strip()
+        score += 2 if _SVC_CODE_RE.fullmatch(code) else -2
+        score += 3 if X12Parser._is_money(billed) else -2
+        score += 3 if X12Parser._is_money(paid) else -2
+        return score
+
+    @classmethod
+    def _score_segment_shape(cls, tag: str, elements: list[str]) -> int:
+        if tag == "CLP":
+            return cls._score_clp(elements)
+        if tag == "CAS":
+            return cls._score_cas(elements)
+        if tag == "SVC":
+            return cls._score_svc(elements)
+        return 0
+
+    @staticmethod
+    def _repair_threshold(tag: str) -> int:
+        return {"CLP": 7, "CAS": 6, "SVC": 6}.get(tag, 999)
+
+    @staticmethod
+    def _generate_shift_candidates(elements: list[str]) -> list[tuple[str, list[str]]]:
+        candidates: list[tuple[str, list[str]]] = []
+        for idx, value in enumerate(elements):
+            if value == "" or value.strip() == "":
+                candidates.append((f"drop_empty_element_{idx + 1}", elements[:idx] + elements[idx + 1 :]))
+        return candidates
+
+    def _repair_raw_segments(self, raw_segments: list[str], elem_sep: str) -> list[str]:
+        if not self.enable_segment_repairs:
+            self.segment_repairs = []
+            return raw_segments
+
+        repaired_segments: list[str] = []
+        self.segment_repairs = []
+
+        for position, raw in enumerate(raw_segments, start=1):
+            parts = raw.split(elem_sep)
+            tag = parts[0].strip() if parts else ""
+            elements = parts[1:]
+
+            if tag not in _REPAIRABLE_SHIFT_TAGS:
+                repaired_segments.append(raw)
+                continue
+
+            score_before = self._score_segment_shape(tag, elements)
+            best_action = "none"
+            best_elements = elements
+            best_score = score_before
+
+            for action, candidate in self._generate_shift_candidates(elements):
+                score = self._score_segment_shape(tag, candidate)
+                if score > best_score:
+                    best_action = action
+                    best_elements = candidate
+                    best_score = score
+
+            if best_action != "none" and best_score >= self._repair_threshold(tag) and best_score >= score_before + 3:
+                repaired_raw = elem_sep.join([tag, *best_elements])
+                self.segment_repairs.append(
+                    SegmentRepairEvent(
+                        position=position,
+                        tag=tag,
+                        action=best_action,
+                        confidence="high" if best_score >= score_before + 5 else "medium",
+                        score_before=score_before,
+                        score_after=best_score,
+                        note="Removed an empty shifted element because the repaired segment fit the expected X12 field pattern better.",
+                        original_raw=raw,
+                        repaired_raw=repaired_raw,
+                    )
+                )
+                repaired_segments.append(repaired_raw)
+            else:
+                repaired_segments.append(raw)
+
+        return repaired_segments
 
     def _parse(self) -> None:
         if self._parsed:
@@ -614,9 +792,10 @@ class X12Parser:
         elem_sep, comp_sep, rep_sep, seg_term = self._detect_delimiters(text)
         tokenizer = X12Tokenizer(seg_term=seg_term, elem_sep=elem_sep)
         raw_segs = tokenizer.tokenize(text)
+        raw_segs = self._repair_raw_segments(raw_segs, elem_sep)
 
-        # Update segment parser with detected element separator
-        self._seg_parser = X12SegmentParser(elem_sep=elem_sep, comp_sep=comp_sep)
+        # Update segment parser with detected delimiters (including repetition separator)
+        self._seg_parser = X12SegmentParser(elem_sep=elem_sep, rep_sep=rep_sep)
         self.segments = [
             self._seg_parser.parse(raw=s, position=i + 1)
             for i, s in enumerate(raw_segs)
@@ -625,6 +804,7 @@ class X12Parser:
         self.interchanges = self._build_interchanges()
         if not self.interchanges and self.segments:
             self.interchanges = self._build_synthetic_interchanges()
+        self._parsed = True
 
     def _find_segment(self, tag: str, start: int = 0) -> Optional[tuple[Segment, int]]:
         for i in range(start, len(self.segments)):
@@ -672,70 +852,31 @@ class X12Parser:
         return "?"
 
     def _build_synthetic_interchanges(self) -> List[Interchange]:
-        """Build envelope placeholders for GS/ST-less or ISA-less files.
-
-        This supports real-world external files that are delivered as:
-        - GS/ST transactions without ISA/IEA
-        - bare ST/SE transactions without ISA/GS
-        - 835/837 fragments that start directly at business segments like BPR/CLP
-        """
         if not self.segments:
             return []
 
         synthetic_isa = Segment("ISA", [], "ISA*SYNTHETIC", 0)
         synthetic_iea = Segment("IEA", [], "IEA*SYNTHETIC", 0)
 
-        # If GS exists, preserve real functional groups and wrap them in a synthetic ISA envelope.
         if any(seg.tag == "GS" for seg in self.segments):
             groups = self._build_groups(0, len(self.segments) - 1)
             if groups:
-                return [
-                    Interchange(
-                        header=synthetic_isa,
-                        groups=groups,
-                        trailer=synthetic_iea,
-                        isa06_sender="",
-                        isa08_receiver="",
-                    )
-                ]
+                return [Interchange(header=synthetic_isa, groups=groups, trailer=synthetic_iea, isa06_sender="", isa08_receiver="")]
 
         synthetic_gs = Segment("GS", [], "GS*SYNTHETIC", 0)
         synthetic_ge = Segment("GE", [], "GE*SYNTHETIC", 0)
 
-        # If ST exists, preserve transaction boundaries and wrap them in synthetic GS/ISA envelopes.
         if any(seg.tag == "ST" for seg in self.segments):
             transactions = self._build_transactions(0, len(self.segments) - 1)
             if transactions:
-                return [
-                    Interchange(
-                        header=synthetic_isa,
-                        groups=[FunctionalGroup(header=synthetic_gs, transactions=transactions, trailer=synthetic_ge)],
-                        trailer=synthetic_iea,
-                        isa06_sender="",
-                        isa08_receiver="",
-                    )
-                ]
+                return [Interchange(header=synthetic_isa, groups=[FunctionalGroup(header=synthetic_gs, transactions=transactions, trailer=synthetic_ge)], trailer=synthetic_iea, isa06_sender="", isa08_receiver="")]
 
-        # Final fallback: treat the entire file as a single transaction fragment.
         set_id = self._infer_transaction_set_id(self.segments)
         synthetic_st = Segment("ST", [Element(raw=set_id, position=1)], f"ST*{set_id}", 0)
         synthetic_se = Segment("SE", [], "SE*SYNTHETIC", 0)
         loops = _detect_loops(self.segments)
-        transaction = TransactionSet(
-            header=synthetic_st,
-            loops=loops,
-            trailer=synthetic_se,
-            set_id=set_id,
-        )
-        return [
-            Interchange(
-                header=synthetic_isa,
-                groups=[FunctionalGroup(header=synthetic_gs, transactions=[transaction], trailer=synthetic_ge)],
-                trailer=synthetic_iea,
-                isa06_sender="",
-                isa08_receiver="",
-            )
-        ]
+        transaction = TransactionSet(header=synthetic_st, loops=loops, trailer=synthetic_se, set_id=set_id)
+        return [Interchange(header=synthetic_isa, groups=[FunctionalGroup(header=synthetic_gs, transactions=[transaction], trailer=synthetic_ge)], trailer=synthetic_iea, isa06_sender="", isa08_receiver="")]
 
     def _build_groups(self, start: int, end: int) -> List[FunctionalGroup]:
         groups: List[FunctionalGroup] = []
@@ -955,17 +1096,6 @@ class X12Parser:
                                 continue
                     return 0.0
 
-                def _first_value(*indexes: int) -> str:
-                    for idx in indexes:
-                        raw = self._seg_get(clp_seg, idx)
-                        if raw not in (None, ""):
-                            return raw
-                    return "?"
-
-                # Support both standard external 835 CLP layouts and simplified internal fixtures.
-                # Standard X12 835 CLP:
-                #   CLP01 claim id, CLP02 status, CLP03 total charge, CLP04 payment, CLP05 patient resp
-                # Some older internal fixtures store billed/status in later positions.
                 clp02 = self._seg_get(clp_seg, 2)
                 clp03 = self._seg_get(clp_seg, 3)
                 clp04 = self._seg_get(clp_seg, 4)
@@ -993,7 +1123,7 @@ class X12Parser:
                     clp_paid = _first_numeric(4)
                     clp_allowed = _first_numeric(5)
                 else:
-                    clp_status = _first_value(6, 3, 2)
+                    clp_status = next((self._seg_get(clp_seg, idx) for idx in (6, 3, 2) if self._seg_get(clp_seg, idx) not in (None, "")), "?")
                     clp_billed = _first_numeric(5, 3, 2)
                     clp_paid = _first_numeric(7, 4)
                     clp_allowed = _first_numeric(5, 7)
@@ -1269,7 +1399,7 @@ class X12Parser:
             cas_by_group: dict[str, float] = {}
             for seg in sum([l.segments for l in ts.loops if l.leader_tag == "CAS"], []):
                 if seg.tag == "CAS":
-                    grp = self._seg_get(seg, 1) or "?"
+                    grp = self._seg_get(seg, 2) or "?"
                     for e_idx in range(3, min(len(seg.elements) + 1, 19), 2):
                         raw = self._seg_get(seg, e_idx)
                         if raw:
@@ -1470,13 +1600,24 @@ class X12Parser:
         current_clm_loop: Optional[Loop] = None
 
         for loop in ts.loops:
-            if loop.leader_tag in ("SV1", "SV2", "SV3"):
+            # Determine whether this loop is a service-line loop.
+            # For SV1/SV2/SV3: the loop leader tag IS the service segment (LX*SV1, LX*SV2, etc.)
+            # For UD (dental): UD is inside an LX loop, so we check if the loop contains UD
+            is_svc_leader = loop.leader_tag in ("SV1", "SV2", "SV3")
+            has_ud = any(seg.tag == "UD" for seg in loop.segments)
+            is_dental_svc_loop = has_ud
+
+            if is_svc_leader or is_dental_svc_loop:
                 # Service line — attach to current claim
                 if current_claim is not None:
                     # Accumulate from this service-line loop
                     sv_billed = 0.0
                     sv_paid = 0.0
                     svc_segment = None
+                    dental_procedure_code = None
+                    dental_tooth_codes: List[str] = []
+                    dental_oral_cavity: List[str] = []
+
                     for seg in loop.segments:
                         if seg.tag in ("SV1", "SV2", "SV3"):
                             svc_segment = seg
@@ -1485,13 +1626,49 @@ class X12Parser:
                                 sv_paid += float(self._seg_get(seg, 4) or "0")
                             except ValueError:
                                 pass
+                        elif seg.tag == "UD":
+                            # UD*AD:D2740*200*150***1**1**Y
+                            # e1 composite: procedure_code (e1:e2 format: plan:procedure_code)
+                            # e3=billed, e4=allowed
+                            svc_segment = seg
+                            raw_e1 = self._seg_get(seg, 1) or ""
+                            # Composite format: "AD:D2740" or just "D2740"
+                            proc_code = raw_e1.split(":")[-1] if raw_e1 else None
+                            dental_procedure_code = proc_code
+                            try:
+                                sv_billed += float(self._seg_get(seg, 3) or "0")
+                                sv_paid += float(self._seg_get(seg, 4) or "0")
+                            except ValueError:
+                                pass
+                        elif seg.tag == "TOO":
+                            # TOO*JP*16*AREA UPPER RIGHT PREMOLAR
+                            # e2 = tooth code (ANSI/ADA tooth code: e.g. "16", "A")
+                            tooth = self._seg_get(seg, 2)
+                            if tooth:
+                                dental_tooth_codes.append(tooth)
+                        elif seg.tag in ("UR1", "UREF"):
+                            # UR1/UREF = Oral Cavity Designator segment
+                            # UR1*UR*08*08*08*08*08*08*08*08
+                            # e1=code (UR/UE), e2+=cavity codes
+                            for e_idx in range(2, len(seg.elements) + 1):
+                                val = self._seg_get(seg, e_idx)
+                                if val:
+                                    dental_oral_cavity.append(val)
+
                     if current_claim is not None:
-                        current_claim["service_lines"].append({
+                        svc_line = {
                             "loop_id": loop.id,
                             "billed": round(sv_billed, 2),
                             "paid": round(sv_paid, 2),
                             "service_line_count": 1,
-                        })
+                        }
+                        if is_dental_svc_loop:
+                            svc_line["procedure_code"] = dental_procedure_code
+                            if dental_tooth_codes:
+                                svc_line["tooth_codes"] = dental_tooth_codes
+                            if dental_oral_cavity:
+                                svc_line["oral_cavity_designators"] = dental_oral_cavity
+                        current_claim["service_lines"].append(svc_line)
                         current_claim["total_svc_billed"] += sv_billed
                         current_claim["total_svc_paid"] += sv_paid
                         service_line_count += 1
@@ -1568,7 +1745,21 @@ class X12Parser:
                     elif entity == "QC":
                         patient_name = name
 
-        return {
+        # Collect dental-specific aggregates (only for dental variant)
+        all_tooth_codes: List[str] = []
+        all_procedure_codes: List[str] = []
+        all_oral_cavities: List[str] = []
+        if variant_info["variant"] == "dental":
+            for cl in claims:
+                for sl in cl.get("service_lines", []):
+                    if "procedure_code" in sl and sl["procedure_code"]:
+                        all_procedure_codes.append(sl["procedure_code"])
+                    if "tooth_codes" in sl:
+                        all_tooth_codes.extend(sl["tooth_codes"])
+                    if "oral_cavity_designators" in sl:
+                        all_oral_cavities.extend(sl["oral_cavity_designators"])
+
+        base_return = {
             "set_id": ts.set_id,
             "segment_count": len(ts.loops) and sum(len(l.segments) for l in ts.loops) or 0,
             "loop_count": len(ts.loops),
@@ -1592,6 +1783,18 @@ class X12Parser:
             "hierarchy": hierarchy,
             "claims": claims,
         }
+
+        # Dental-specific aggregates
+        if variant_info["variant"] == "dental":
+            base_return["dental"] = {
+                "procedure_codes": list(dict.fromkeys(all_procedure_codes)),  # deduplicated
+                "tooth_codes": list(dict.fromkeys(all_tooth_codes)),
+                "oral_cavity_designators": list(dict.fromkeys(all_oral_cavities)),
+                "procedure_code_count": len(set(all_procedure_codes)),
+                "tooth_code_count": len(set(all_tooth_codes)),
+            }
+
+        return base_return
 
     def _parse_summary(self) -> None:
         """Compute and attach summary dict to each TransactionSet."""
@@ -1618,13 +1821,19 @@ class X12Parser:
         return {
             "version": __version__,
             "schema_version": OUTPUT_SCHEMA_VERSION,
-            "warnings": self.warnings,
             # Metadata about parsing decisions that may affect downstream consumers
             "metadata": {
                 # Loop IDs are derived from the first element of the loop's leader segment
                 # (e.g., "PR", "QC", "CLM"). This is a heuristic; verify loop semantics
                 # match your expectations for novel transaction types.
                 "loop_id_source": "heuristic_first_element",
+                "segment_repair_summary": {
+                    "enabled": self.enable_segment_repairs,
+                    "mode": "tolerant" if self.enable_segment_repairs else "strict",
+                    "repairable_tags": sorted(_REPAIRABLE_SHIFT_TAGS),
+                    "repairs_applied": len(self.segment_repairs),
+                    "repairs": [asdict(event) for event in self.segment_repairs],
+                },
             },
             "interchanges": [
                 {
@@ -1660,12 +1869,12 @@ class X12Parser:
 
 # ── Public helpers ─────────────────────────────────────────────────────────────
 
-def parse(text: str) -> X12Parser:
-    p = X12Parser(text)
+def parse(text: str, enable_segment_repairs: bool = True) -> X12Parser:
+    p = X12Parser(text, enable_segment_repairs=enable_segment_repairs)
     p._parse()
     return p
 
-def parse_file(path: str | pathlib.Path) -> X12Parser:
-    p = X12Parser.from_file(path)
+def parse_file(path: str | pathlib.Path, enable_segment_repairs: bool = True) -> X12Parser:
+    p = X12Parser.from_file(path, enable_segment_repairs=enable_segment_repairs)
     p._parse()
     return p

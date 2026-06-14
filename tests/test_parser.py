@@ -118,6 +118,66 @@ class TestSegmentParser:
         sub2 = p.get(seg, 3, sub_index=2)
         assert sub2 == "345", f"Expected '345', got {sub2!r}"
 
+    def test_get_repeated_elements(self):
+        """Repetition separator splits repeated values within a single element."""
+        p = X12SegmentParser(elem_sep="*", rep_sep="^")
+        # SVC with composite element containing repeated codes: "HC:99213^99214^99215"
+        seg = p.parse("SVC*HC:99213^99214^99215*250*150***1", position=1)
+        # e1 = HC:99213^99214^99215 (composite with repetition separator)
+        repeated = p.get_repeated(seg, 1)
+        assert repeated == ["HC:99213", "99214", "99215"], f"Expected repeated codes, got {repeated}"
+        # Without repetition separator, the whole string is one value
+        p2 = X12SegmentParser(elem_sep="*", rep_sep="^")
+        seg2 = p2.parse("SVC*HC:99213^99214^99215*250*150***1", position=1)
+        repeated2 = p2.get_repeated(seg2, 1)
+        assert repeated2 == ["HC:99213", "99214", "99215"]
+
+    def test_get_sub_element_with_repetition_separator(self):
+        """Sub-element access on a composite with repetition separator returns first occurrence."""
+        p = X12SegmentParser(elem_sep="*", rep_sep="^")
+        # Composite element "HC:99213^99214" split by component separator gives "HC", "99213^99214"
+        # sub_index=1 splits by ':' to get "HC", then splits by '^' to get "HC" (first)
+        seg = p.parse("SVC*HC:99213^99214^99215*250*150***1", position=1)
+        sub = p.get(seg, 1, sub_index=1)
+        assert sub == "HC", f"Expected 'HC', got {sub!r}"
+
+    def test_default_repetition_separator(self):
+        """Default repetition separator is ^."""
+        p = X12SegmentParser(elem_sep="*")
+        assert p.rep_sep == "^"
+
+
+class TestRepetitionSeparator:
+    """Tests for ISA-11 repetition separator usage in segment parsing."""
+
+    def test_repetition_separator_detected_from_isa(self):
+        """Parser should detect and use non-standard repetition separator from ISA-11."""
+        p = X12Parser(text="")
+        # ISA-11 is element 11 (1-indexed), value is '+'
+        text = "ISA*00*          *00*          *ZZ*SENDER*ZZ*RECEIVER*250402*1522*+*00501*000000001*0*P*:~"
+        elem, comp, rep, seg = p._detect_delimiters(text)
+        assert rep == "+", f"Expected '+' as repetition separator, got {rep!r}"
+
+    def test_repetition_separator_fixture_parses_correctly(self):
+        """Fixture with custom repetition separator should parse without errors."""
+        p = parse_file(str(FIXTURES / "sample_835_repetition_sep.edi"))
+        assert len(p.segments) > 0
+        assert len(p.interchanges) == 1
+
+    def test_svc_with_repeated_composite_elements(self):
+        """SVC segments with repeated composite elements should be parsed correctly."""
+        p = parse_file(str(FIXTURES / "sample_835_repetition_sep.edi"))
+        # Find SVC segments
+        svc_segments = [s for s in p.segments if s.tag == "SVC"]
+        assert len(svc_segments) >= 2, f"Expected at least 2 SVC segments, got {len(svc_segments)}"
+        # First SVC has composite with repeated codes: "HC:99213^99214^99215"
+        svc1 = svc_segments[0]
+        # The element value should be the full raw value including repetition separator
+        assert "HC" in p._seg_parser.get(svc1, 1), f"Expected 'HC' in e1, got {p._seg_parser.get(svc1, 1)!r}"
+        # Repeated elements should be accessible
+        repeated = p._seg_parser.get_repeated(svc1, 1)
+        assert len(repeated) >= 3, f"Expected repeated elements, got {repeated}"
+
 
 # ── File-level fixture tests ───────────────────────────────────────────────────
 

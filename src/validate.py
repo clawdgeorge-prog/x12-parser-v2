@@ -250,6 +250,8 @@ class X12Validator:
             "CLM", "BPR", "LQ", "F9", "N2", "G93", "TS2", "TS3", "MIA", "MOA",
             # 837 recognized segments (bounded support)
             "PRV", "CL1", "PWK", "OI", "SVD", "MEA", "PS1", "FRM",
+            # 837D dental-specific segments
+            "TOO", "UR1", "UREF",
         ))
 
         # Identify orphan ISA/IEA/GS/GE segments that appear outside interchanges
@@ -366,13 +368,21 @@ class X12Validator:
                     )
                     st_control = st_seg.get("elements", {}).get("e2", "?")
                     if declared_count != actual_count:
-                        result.add_error(
-                            "SE_COUNT_MISMATCH",
-                            f"Transaction {ts_idx+1} (ST*...*{st_control}): "
-                            f"SE declares {declared_count} segments, "
-                            f"but found {actual_count} (positions {st_pos}–{se_pos})",
-                            "SE", se_pos,
+                        # In fragment-aware mode, suppress SE_COUNT_MISMATCH for synthetic
+                        # envelopes (bare transaction fragments). Real envelopes should still
+                        # be checked — fragment-aware only suppresses envelope PAIRING errors.
+                        is_synthetic = (
+                            self._is_fragment_mode
+                            and ic.get("header", {}).get("raw") == "ISA*SYNTHETIC"
                         )
+                        if not is_synthetic:
+                            result.add_error(
+                                "SE_COUNT_MISMATCH",
+                                f"Transaction {ts_idx+1} (ST*...*{st_control}): "
+                                f"SE declares {declared_count} segments, "
+                                f"but found {actual_count} (positions {st_pos}–{se_pos})",
+                                "SE", se_pos,
+                            )
 
         # ── 8. ISA date/time format validation ──────────────────────────────
         # ISA-09: CCYYMMDD, ISA-10: HHMM (or HHMMSS or HHMMdd - take first 4)
@@ -598,6 +608,37 @@ class X12Validator:
                             "HI", 0,
                         )
 
+                    # ── Dental (837D) variant checks ───────────────────────────
+                    if has_ud and not has_sv1 and not has_sv2:
+                        # UD present → dental variant
+                        if "TOO" not in all_tags:
+                            result.add_warning(
+                                "DENTAL_TOO_RECOMMENDED",
+                                f"Transaction {ts_idx + 1} (837 Dental): "
+                                f"TOO (Tooth Identification) segment not found; "
+                                f"dental claims for restorative/prosthetic services often include tooth codes",
+                                "TOO", 0,
+                            )
+                        if "UR1" not in all_tags and "UREF" not in all_tags:
+                            result.add_warning(
+                                "DENTAL_UR1_RECOMMENDED",
+                                f"Transaction {ts_idx + 1} (837 Dental): "
+                                f"UR1/UREF (Oral Cavity Designator) segment not found; "
+                                f"oral cavity designators are recommended for surgical extractions",
+                                "UR1", 0,
+                            )
+                        # UD segments should have a procedure code in e1
+                        ud_segments = []
+                        for loop in ts.get("loops", []):
+                            for seg in loop.get("segments", []):
+                                if seg["tag"] == "UD":
+                                    ud_segments.append(seg)
+                        for seg in ud_segments:
+                            e1 = seg.get("elements", {}).get("e1", "")
+                            if e1 and ":" not in e1 and not e1[0].isdigit():
+                                # Procedure code should be a real code; warn if it looks like a placeholder
+                                pass  # procedure code format varies by payer; skip strict format check
+
         # ── 14. CLP status code sanity check ─────────────────────────────────
         # CLP status codes should be in the valid range (1-29 per X12)
         for ic in data.get("interchanges", []):
@@ -698,6 +739,113 @@ class X12Validator:
                                         "PLB", seg.get("position", 0),
                                     )
 
+        # ── 18. Element data-type validation ─────────────────────────────────
+        # Validate that fields with known type expectations actually meet those
+        # expectations: numeric fields are numeric, date fields match CCYYMMDD,
+        # and string fields don't contain unexpected X12 delimiters.
+        for seg in raw_segs:
+            tag = seg.tag
+            elems = seg.elements  # List[Element]
+            if not elems:
+                continue
+
+            if tag == "CLP":
+                # e2=billed amount (index 1), e4=paid amount (index 3) — should be numeric
+                for idx, elem_name in ((1, "billed"), (3, "paid")):
+                    if idx >= len(elems):
+                        continue
+                    raw = elems[idx].raw.strip() if elems[idx].raw else ""
+                    if raw and not _is_numeric(raw):
+                        result.add_warning(
+                            "ELEM_NOT_NUMERIC",
+                            f"CLP at position {seg.position}: {elem_name} amount ({raw!r}) "
+                            f"is not a valid number",
+                            "CLP", seg.position,
+                        )
+            elif tag == "SVC":
+                # e2=billed amount (index 1), e3=paid amount (index 2) — should be numeric
+                for idx, elem_name in ((1, "billed"), (2, "paid")):
+                    if idx >= len(elems):
+                        continue
+                    raw = elems[idx].raw.strip() if elems[idx].raw else ""
+                    if raw and not _is_numeric(raw):
+                        result.add_warning(
+                            "ELEM_NOT_NUMERIC",
+                            f"SVC at position {seg.position}: {elem_name} amount ({raw!r}) "
+                            f"is not a valid number",
+                            "SVC", seg.position,
+                        )
+            elif tag == "CAS":
+                # CAS adjustment amounts at indices 2, 5, 8, 11, 14, 17 (0-based)
+                amount_indices = [2, 5, 8, 11, 14, 17]
+                for e_idx in amount_indices:
+                    if e_idx >= len(elems):
+                        continue
+                    raw = elems[e_idx].raw.strip() if elems[e_idx].raw else ""
+                    if raw and not _is_numeric(raw):
+                        result.add_warning(
+                            "ELEM_NOT_NUMERIC",
+                            f"CAS at position {seg.position}: adjustment amount ({raw!r}) "
+                            f"is not a valid number",
+                            "CAS", seg.position,
+                        )
+            elif tag == "DTM":
+                # DTM e2 (index 1) is the date qualifier (D8, RD8, etc.)
+                # The actual date value location depends on the qualifier:
+                # - For D8/RD8/D9/RD9/RP/RB qualifiers: date is in e3 (index 2), may include range
+                # - For other qualifiers (e.g. 405, 472): date is in e2 (index 1)
+                if len(elems) > 1:
+                    qualifier = elems[1].raw.strip() if elems[1].raw else ""
+                    if qualifier in ("D8", "RD8", "D9", "RD9", "RP", "RB"):
+                        # Date (or date range) is in e3
+                        if len(elems) > 2:
+                            date_raw = elems[2].raw.strip() if elems[2].raw else ""
+                            # RD8 can contain a range like 20050608-20050609 — skip range dates
+                            if date_raw and "-" not in date_raw and not _is_ccyymmdd(date_raw):
+                                result.add_warning(
+                                    "ELEM_INVALID_DATE",
+                                    f"DTM at position {seg.position}: date ({date_raw!r}) "
+                                    f"does not match CCYYMMDD format",
+                                    "DTM", seg.position,
+                                )
+                    else:
+                        # Non-date qualifiers: e2 is the date value
+                        raw = qualifier
+                        if raw and not _is_ccyymmdd(raw):
+                            result.add_warning(
+                                "ELEM_INVALID_DATE",
+                                f"DTM at position {seg.position}: date ({raw!r}) "
+                                f"does not match CCYYMMDD format",
+                                "DTM", seg.position,
+                            )
+            elif tag == "BHT":
+                # BHT e4 (index 3) should be CCYYMMDD format
+                if len(elems) > 3:
+                    raw = elems[3].raw.strip() if elems[3].raw else ""
+                    if raw and not _is_ccyymmdd(raw):
+                        result.add_warning(
+                            "ELEM_INVALID_DATE",
+                            f"BHT at position {seg.position}: date element ({raw!r}) "
+                            f"does not match CCYYMMDD format",
+                            "BHT", seg.position,
+                        )
+
+            # String field delimiter check: flag any element that contains
+            # the segment delimiter (~) which should not appear within a single element
+            # (only at segment boundaries). Skip the final element of each segment
+            # since the segment-terminating ~ is stored in its raw value.
+            for e_idx in range(len(elems) - 1):
+                elem = elems[e_idx]
+                raw = elem.raw if elem.raw else ""
+                if raw and "~" in raw:
+                    result.add_warning(
+                        "ELEM_INVALID_DELIMITER",
+                        f"{tag} at position {seg.position}: element e{e_idx + 1} "
+                        f"contains unexpected delimiter ({raw!r}); "
+                        f"check for data corruption or incorrect field parsing",
+                        tag, seg.position,
+                    )
+
         return result
 
 
@@ -710,6 +858,24 @@ def _is_numeric(value: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _is_ccyymmdd(value: str) -> bool:
+    """Return True if value matches CCYYMMDD date format (8 digits)."""
+    if not value or len(value) != 8:
+        return False
+    if not value.isdigit():
+        return False
+    year = int(value[:4])
+    month = int(value[4:6])
+    day = int(value[6:8])
+    if year < 1900 or year > 2100:
+        return False
+    if month < 1 or month > 12:
+        return False
+    if day < 1 or day > 31:
+        return False
+    return True
 
 
 # ── Schema-driven validation rules ──────────────────────────────────────────
@@ -841,12 +1007,17 @@ _ISSUE_CATEGORIES: dict[str, str] = {
     "SVC_DATE_MISSING":      "semantic",
     "BPR_CLP_SUM_MISMATCH":  "semantic",
     "CLAIM_WITHOUT_SERVICE_LINES": "semantic",
+    "DENTAL_TOO_RECOMMENDED": "semantic",
+    "DENTAL_UR1_RECOMMENDED": "semantic",
     # Data quality
     "ISA_DATE_INVALID":      "data_quality",
     "ISA_TIME_INVALID":      "data_quality",
     "NON_NUMERIC_AMOUNT":    "data_quality",
     "CLAIM_ID_DUPLICATE":    "data_quality",
     "PLB_REFERENCE_INVALID": "data_quality",
+    "ELEM_NOT_NUMERIC":      "data_quality",
+    "ELEM_INVALID_DATE":     "data_quality",
+    "ELEM_INVALID_DELIMITER":"data_quality",
     # Content
     "UNKNOWN_SEGMENT":       "content",
 }
@@ -1088,6 +1259,23 @@ _ISSUE_RECOMMENDATIONS = {
         "'REASON:CLAIMREF' colon-delimited format (e.g. 'CV:CLP001'). "
         "The adjustment may still be valid but could indicate a non-standard payer variant. "
         "Verify the adjustment was attributed to the correct claim.",
+    "ELEM_NOT_NUMERIC": "A field expected to be numeric contains a non-numeric value. "
+        "This may indicate a delimiter problem (e.g., a stray asterisk in an amount field) "
+        "or data corruption. Review the raw segment and verify the element is in the correct position.",
+    "ELEM_INVALID_DATE": "A date field does not match the expected CCYYMMDD format. "
+        "Verify the date is 8 digits (e.g., 20250402) and represents a valid calendar date. "
+        "Invalid dates may indicate a data entry error or a non-standard date format.",
+    "ELEM_INVALID_DELIMITER": "An element value contains a segment delimiter (~) which should "
+        "not appear within a single element. This typically indicates a parsing error or data corruption. "
+        "Review the raw segment to determine if the delimiter was introduced in error.",
+    "DENTAL_TOO_RECOMMENDED": "TOO (Tooth Identification) segments are recommended for 837D dental claims "
+        "involving restorative, prosthetic, or surgical services on specific teeth. "
+        "Add TOO segments with the appropriate ANSI/ADA tooth codes (e.g., '1'-'32' for permanent teeth, "
+        "'A'-'T' for primary teeth) when applicable.",
+    "DENTAL_UR1_RECOMMENDED": "UR1/UREF (Oral Cavity Designator) segments are recommended for 837D dental "
+        "claims involving surgical extractions or procedures affecting oral cavity areas. "
+        "Add UR1 or UREF segments with the appropriate cavity designator codes (e.g., 'UR', 'UL', 'LA', 'LP') "
+        "when the claim involves surgical extraction of teeth.",
 }
 
 

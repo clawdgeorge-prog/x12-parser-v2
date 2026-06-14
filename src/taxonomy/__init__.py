@@ -94,6 +94,7 @@ _LOOP_KINDS: Dict[str, str] = {
     "SV3": "service",
     "SV4": "service",
     "SV5": "service",
+    "UD":  "service",
     "HI": "diagnosis",
     "HCP": "pricing",
     "BHT": "header",
@@ -123,6 +124,9 @@ _LOOP_KINDS: Dict[str, str] = {
     "CR4": "durable_medical",
     "CR5": "vision",
     "ENT": "entity",
+    "TOO": "dental_tooth",
+    "UR1": "dental_oral_cavity",
+    "UREF": "dental_oral_cavity",
     "BPR": "payment",
     "TRN": "trace",
     # Known-optional 835 segments — recognized as loop leaders, not deeply semanticized

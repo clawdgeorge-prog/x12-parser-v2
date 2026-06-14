@@ -858,6 +858,216 @@ if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
 
 
+# ── Element data-type validation tests ──────────────────────────────────────
+
+class TestValidateElementDataTypes:
+    """Element data-type validation: numeric, date, and delimiter checks."""
+
+    def test_clp_non_numeric_e2_detected(self):
+        """CLP e2 (billed amount) should be flagged when non-numeric."""
+        edi = (
+            "ISA*00*          *00*          *ZZ*SENDER         *ZZ*RECEIVER       "
+            "*250402*1234*^*00501*000000001*0*P*:~GS*HP*SENDER*RECEIVER*20250402*1234*1*X*005010X221A1~"
+            "ST*835*0001*005010X221A1~"
+            "BPR*I*1000*C*ACH~"
+            "TRN*1*0000000001~"
+            "N1*PR*INSURANCE~"
+            "CLP*CLM001*NOTNUM*200*3**CL*12*345~"
+            "SE*7*0001~GE*1*1~IEA*1*000000001~"
+        )
+        p = X12Parser(text=edi)
+        v = X12Validator(p)
+        r = v.validate()
+        assert "ELEM_NOT_NUMERIC" in codes(r)
+
+    def test_clp_non_numeric_e4_detected(self):
+        """CLP e4 (paid amount) should be flagged when non-numeric."""
+        edi = (
+            "ISA*00*          *00*          *ZZ*SENDER         *ZZ*RECEIVER       "
+            "*250402*1234*^*00501*000000001*0*P*:~GS*HP*SENDER*RECEIVER*20250402*1234*1*X*005010X221A1~"
+            "ST*835*0001*005010X221A1~"
+            "BPR*I*1000*C*ACH~"
+            "TRN*1*0000000001~"
+            "N1*PR*INSURANCE~"
+            "CLP*CLM001*100*200*BADPAID*3**CL*12*345~"
+            "SE*7*0001~GE*1*1~IEA*1*000000001~"
+        )
+        p = X12Parser(text=edi)
+        v = X12Validator(p)
+        r = v.validate()
+        assert "ELEM_NOT_NUMERIC" in codes(r)
+
+    def test_svc_non_numeric_e4_detected(self):
+        """SVC e2 (billed amount) should be flagged when non-numeric."""
+        edi = (
+            "ISA*00*          *00*          *ZZ*SENDER         *ZZ*RECEIVER       "
+            "*250402*1234*^*00501*000000001*0*P*:~GS*HP*SENDER*RECEIVER*20250402*1234*1*X*005010X221A1~"
+            "ST*835*0001*005010X221A1~"
+            "BPR*I*1000*C*ACH~"
+            "TRN*1*0000000001~"
+            "N1*PR*INSURANCE~"
+            "CLP*CLM001*100*200*150*3**CL*12*345~"
+            "SVC*HC:99213*BADAMT*150***1~"
+            "SE*8*0001~GE*1*1~IEA*1*000000001~"
+        )
+        p = X12Parser(text=edi)
+        v = X12Validator(p)
+        r = v.validate()
+        assert "ELEM_NOT_NUMERIC" in codes(r)
+
+    def test_svc_non_numeric_e5_detected(self):
+        """SVC e3 (paid amount) should be flagged when non-numeric."""
+        edi = (
+            "ISA*00*          *00*          *ZZ*SENDER         *ZZ*RECEIVER       "
+            "*250402*1234*^*00501*000000001*0*P*:~GS*HP*SENDER*RECEIVER*20250402*1234*1*X*005010X221A1~"
+            "ST*835*0001*005010X221A1~"
+            "BPR*I*1000*C*ACH~"
+            "TRN*1*0000000001~"
+            "N1*PR*INSURANCE~"
+            "CLP*CLM001*100*200*150*3**CL*12*345~"
+            "SVC*HC:99213*200*BADPAID***1~"
+            "SE*8*0001~GE*1*1~IEA*1*000000001~"
+        )
+        p = X12Parser(text=edi)
+        v = X12Validator(p)
+        r = v.validate()
+        assert "ELEM_NOT_NUMERIC" in codes(r)
+
+    def test_cas_non_numeric_amount_detected(self):
+        """CAS adjustment amount should be flagged when non-numeric."""
+        edi = (
+            "ISA*00*          *00*          *ZZ*SENDER         *ZZ*RECEIVER       "
+            "*250402*1234*^*00501*000000001*0*P*:~GS*HP*SENDER*RECEIVER*20250402*1234*1*X*005010X221A1~"
+            "ST*835*0001*005010X221A1~"
+            "BPR*I*1000*C*ACH~"
+            "TRN*1*0000000001~"
+            "N1*PR*INSURANCE~"
+            "CLP*CLM001*100*200*150*3**CL*12*345~"
+            "CAS*CO*45*BADAMT~"
+            "SE*8*0001~GE*1*1~IEA*1*000000001~"
+        )
+        p = X12Parser(text=edi)
+        v = X12Validator(p)
+        r = v.validate()
+        assert "ELEM_NOT_NUMERIC" in codes(r)
+
+    def test_dtm_invalid_date_format_detected(self):
+        """DTM e2 should be flagged when not CCYYMMDD format."""
+        edi = (
+            "ISA*00*          *00*          *ZZ*SENDER         *ZZ*RECEIVER       "
+            "*250402*1234*^*00501*000000001*0*P*:~GS*HP*SENDER*RECEIVER*20250402*1234*1*X*005010X221A1~"
+            "ST*835*0001*005010X221A1~"
+            "BPR*I*1000*C*ACH~"
+            "TRN*1*0000000001~"
+            "N1*PR*INSURANCE~"
+            "DTM*001*BADDATE~"
+            "SE*6*0001~GE*1*1~IEA*1*000000001~"
+        )
+        p = X12Parser(text=edi)
+        v = X12Validator(p)
+        r = v.validate()
+        assert "ELEM_INVALID_DATE" in codes(r)
+
+    def test_dtm_valid_ccyymmdd_passes(self):
+        """DTM e2 with valid CCYYMMDD should not be flagged."""
+        edi = (
+            "ISA*00*          *00*          *ZZ*SENDER         *ZZ*RECEIVER       "
+            "*250402*1234*^*00501*000000001*0*P*:~GS*HP*SENDER*RECEIVER*20250402*1234*1*X*005010X221A1~"
+            "ST*835*0001*005010X221A1~"
+            "BPR*I*1000*C*ACH~"
+            "TRN*1*0000000001~"
+            "N1*PR*INSURANCE~"
+            "DTM*001*20250402~"
+            "SE*6*0001~GE*1*1~IEA*1*000000001~"
+        )
+        p = X12Parser(text=edi)
+        v = X12Validator(p)
+        r = v.validate()
+        date_codes = {i.code for i in r.issues if i.code == "ELEM_INVALID_DATE"}
+        assert date_codes == set()
+
+    def test_clm_invalid_date_e5_detected(self):
+        """CLM e5 (service date) should be flagged when not CCYYMMDD."""
+        edi = (
+            "ISA*00*          *00*          *ZZ*SENDER         *ZZ*RECEIVER       "
+            "*250402*1234*^*00501*000000001*0*P*:~GS*HC*SENDER*RECEIVER*20250402*1234*1*X*005010X222A1~"
+            "ST*837*0001*005010X222A1~"
+            "BHT*0019*11*CLAIM001*BADDATE*1234*CH~"
+            "NM1*41*2*BILLING*****46*12345~"
+            "HL*1**20*1~"
+            "NM1*85*2*DR SMITH*****XX*123456~"
+            "CLM*CLM001*500***11:B:1*Y*A*Y*Y~"
+            "SE*7*0001~GE*1*1~IEA*1*000000001~"
+        )
+        p = X12Parser(text=edi)
+        v = X12Validator(p)
+        r = v.validate()
+        assert "ELEM_INVALID_DATE" in codes(r)
+
+    def test_bht_invalid_date_e4_detected(self):
+        """BHT e4 (date) should be flagged when not CCYYMMDD."""
+        edi = (
+            "ISA*00*          *00*          *ZZ*SENDER         *ZZ*RECEIVER       "
+            "*250402*1234*^*00501*000000001*0*P*:~GS*HC*SENDER*RECEIVER*20250402*1234*1*X*005010X222A1~"
+            "ST*837*0001*005010X222A1~"
+            "BHT*0019*11*CLAIM001*BADDATE*1234*CH~"
+            "NM1*41*2*BILLING*****46*12345~"
+            "HL*1**20*1~"
+            "NM1*85*2*DR SMITH*****XX*123456~"
+            "CLM*CLM001*500***11:B:1*Y*A*Y*Y~"
+            "SE*7*0001~GE*1*1~IEA*1*000000001~"
+        )
+        p = X12Parser(text=edi)
+        v = X12Validator(p)
+        r = v.validate()
+        assert "ELEM_INVALID_DATE" in codes(r)
+
+    def test_element_with_segment_delimiter_detected(self):
+        """An element with embedded segment delimiter (~) should be flagged.
+
+        We test this by directly constructing a Segment with a ~ inside an element,
+        bypassing the normal parser which treats ~ as segment terminator.
+        """
+        from src.parser import X12Parser, Segment, Element
+        from src.validate import X12Validator
+
+        p = X12Parser(text="ISA*00*0*00*0*ZZ*X*ZZ*Y*250402*1234*^*00501*0*0*P*:~")  # minimal valid ISA
+        p._parse()
+
+        # Replace the ISA segment in raw_segs with one that has ~ inside element 3
+        seg = p.segments[0]
+        # Build a new segment with ~ inside element 3 (sender ID)
+        bad_seg = Segment(
+            tag="ISA",
+            elements=[
+                Element(raw="00", position=1),
+                Element(raw="0", position=2),
+                Element(raw="~BAD~DATA~HERE", position=3),  # ~ inside element
+                Element(raw="00", position=4),
+            ],
+            raw="ISA*00*0*~BAD~DATA~HERE*00*0",
+            position=1,
+        )
+        # Temporarily replace the segment
+        orig_seg = p.segments[0]
+        p.segments[0] = bad_seg
+
+        v = X12Validator(p)
+        r = v.validate()
+
+        # Restore
+        p.segments[0] = orig_seg
+
+        assert "ELEM_INVALID_DELIMITER" in codes(r)
+
+    def test_clean_fixture_no_type_errors(self):
+        """Well-formed fixtures should have no element type errors."""
+        result = validate_fixture("sample_835.edi")
+        type_codes = {"ELEM_NOT_NUMERIC", "ELEM_INVALID_DATE", "ELEM_INVALID_DELIMITER"}
+        found = {i.code for i in result.issues if i.code in type_codes}
+        assert found == set(), f"Expected no type errors, got: {found}"
+
+
 # ── Fragment-aware mode tests ────────────────────────────────────────────
 
 class TestFragmentAwareMode:

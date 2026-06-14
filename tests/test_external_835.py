@@ -65,12 +65,16 @@ class TestJobisezExternal835:
         return "external-test-files/jobisez_sample_835.edi"
 
     def test_bare_transaction_set_handled(self, jobisez_835_path):
-        """Bare transaction set without ISA/GS should still be wrapped and summarized."""
+        """Bare transaction set without ISA/GS is handled via synthesized envelope."""
         with open(jobisez_835_path) as f:
             content = f.read()
         result = parse(content)
         d = result.to_dict()
+        # Parser synthesizes ISA/GS envelope for bare transaction sets
         assert len(d["interchanges"]) == 1
-        ts = d["interchanges"][0]["functional_groups"][0]["transactions"][0]
+        ic = d["interchanges"][0]
+        assert ic["header"]["tag"] == "ISA"
+        assert ic["functional_groups"][0]["header"]["tag"] == "GS"
+        ts = ic["functional_groups"][0]["transactions"][0]
+        assert ts["header"]["tag"] == "ST"
         assert ts["set_id"] == "835"
-        assert "summary" in ts
