@@ -1057,6 +1057,7 @@ class X12Parser:
         claims: list[dict] = []
         discrepancies: list[dict] = []
         current_claim: Optional[dict] = None
+        counted_svc_positions: set[int] = set()
 
         # PLB summary: accumulate by adjustment reason code
         plb_by_code: dict[str, float] = {}
@@ -1110,6 +1111,12 @@ class X12Parser:
                         return True
                     except ValueError:
                         return False
+
+                def _is_status_code(raw: Optional[str]) -> bool:
+                    """Check if raw is a valid CLP status code (1-29)."""
+                    if raw in (None, ""):
+                        return False
+                    return raw in _CLP_STATUS_CODES
 
                 standard_clp_layout = (clp02 in _CLP_STATUS_CODES) and _is_number(clp03) and _is_number(clp04)
                 alternate_clp_layout = (clp03 in _CLP_STATUS_CODES) and _is_number(clp02)
@@ -1167,8 +1174,8 @@ class X12Parser:
                             if grp_code:
                                 current_claim["adjustment_group_codes"].add(grp_code)
                             # CAS elements: e1=group_code, e2=reason1, e3=amount1, e4=reason2, e5=amount2...
-                            # Amounts are at odd 1-indexed positions: e3, e5, e7...
-                            for e_idx in range(3, min(len(seg.elements) + 1, 19), 2):
+                            # Amounts are at 1-indexed positions: e4, e7, e10, e13, e16, e19 (step 3 from e4)
+                            for e_idx in range(4, min(len(seg.elements) + 1, 20), 3):
                                 raw = self._seg_get(seg, e_idx)
                                 if raw:
                                     try:
@@ -1192,18 +1199,22 @@ class X12Parser:
                                 current_claim["svc_paid"] += svc_p
                             except ValueError:
                                 pass
-                    current_claim["service_line_count"] += 1
-                    service_line_count += 1
+                    # Only count if none of this loop's SVC segments have been counted
+                    svc_positions = [s.position for s in loop.segments if s.tag in ("SVC", "SV1", "SV2", "SV3")]
+                    if not any(pos in counted_svc_positions for pos in svc_positions):
+                        current_claim["service_line_count"] += 1
+                        service_line_count += 1
+                        counted_svc_positions.update(svc_positions)
                 continue
 
             # Other loops (LX, DTM, REF, PER, etc.) — check for embedded SVC
             # SVC can be absorbed into non-SVC loop leaders (e.g. DTM or bare loops)
-            # Only count it if it looks like a service-line loop:
-            # - SVC present AND loop has ≤ 5 segments (avoids false positives)
+            # Only count it if the loop leader is a service-line header type:
+            SERVICE_LEADER_TAGS = frozenset(("LX", "DTM", "REF"))
             if current_claim is not None:
                 svc_segs_in_loop = [s for s in loop.segments
                                     if s.tag in ("SVC", "SV1", "SV2", "SV3")]
-                if svc_segs_in_loop and len(loop.segments) <= 5:
+                if svc_segs_in_loop and loop.leader_tag in SERVICE_LEADER_TAGS:
                     for seg in svc_segs_in_loop:
                         try:
                             svc_b = float(self._seg_get(seg, 2) or "0")
@@ -1212,8 +1223,12 @@ class X12Parser:
                             current_claim["svc_paid"] += svc_p
                         except ValueError:
                             pass
-                    current_claim["service_line_count"] += len(svc_segs_in_loop)
-                    service_line_count += len(svc_segs_in_loop)
+                    # Only count if none of these SVC segments have been counted
+                    svc_positions = [s.position for s in svc_segs_in_loop]
+                    if not any(pos in counted_svc_positions for pos in svc_positions):
+                        current_claim["service_line_count"] += len(svc_segs_in_loop)
+                        service_line_count += len(svc_segs_in_loop)
+                        counted_svc_positions.update(svc_positions)
                 continue
 
             if loop.leader_tag == "NM1" and loop.leader_code == "QC":
@@ -1331,8 +1346,8 @@ class X12Parser:
         for loop in ts.loops:
             for seg in loop.segments:
                 if seg.tag == "BPR":
-                    bpr_payment_method = self._seg_get(seg, 4) or self._seg_get(seg, 1)
-                    bpr_account_type = self._seg_get(seg, 15) or self._seg_get(seg, 8)
+                    bpr_payment_method = self._seg_get(seg, 4)
+                    bpr_account_type = self._seg_get(seg, 15)
                     break
 
         # ── Enrich claim records with status descriptions ───────────────────
@@ -1401,8 +1416,8 @@ class X12Parser:
             cas_by_group: dict[str, float] = {}
             for seg in sum([l.segments for l in ts.loops if l.leader_tag == "CAS"], []):
                 if seg.tag == "CAS":
-                    grp = self._seg_get(seg, 2) or "?"
-                    for e_idx in range(3, min(len(seg.elements) + 1, 19), 2):
+                    grp = self._seg_get(seg, 1) or "?"
+                    for e_idx in range(4, min(len(seg.elements) + 1, 20), 3):
                         raw = self._seg_get(seg, e_idx)
                         if raw:
                             try:
@@ -1435,6 +1450,9 @@ class X12Parser:
                 "cas_adjustments_by_group": {k: round(v, 2) for k, v in cas_by_group.items()},
             })
 
+        # Compute total PLB adjustment for net_difference calculation
+        plb_total = sum(plb_by_code.values()) if plb_by_code else 0.0
+
         summary.update({
             "payment_amount": payment_amount,
             "check_trace": check_trace,
@@ -1442,7 +1460,7 @@ class X12Parser:
             "total_allowed_amount": round(total_allowed, 2),
             "total_paid_amount": round(total_paid, 2),
             "total_adjustment_amount": round(total_adjustment, 2),
-            "net_difference": round(total_billed - total_paid - total_adjustment, 2),
+            "net_difference": round(total_billed - total_paid - total_adjustment - plb_total, 2),
             "claim_count": claim_count,
             "service_line_count": service_line_count,
             "plb_count": plb_count,
@@ -1624,14 +1642,14 @@ class X12Parser:
                         if seg.tag in ("SV1", "SV2", "SV3"):
                             svc_segment = seg
                             try:
-                                sv_billed += float(self._seg_get(seg, 3) or "0")
-                                sv_paid += float(self._seg_get(seg, 4) or "0")
+                                sv_billed += float(self._seg_get(seg, 2) or "0")
+                                sv_paid += float(self._seg_get(seg, 3) or "0")
                             except ValueError:
                                 pass
                         elif seg.tag == "UD":
                             # UD*AD:D2740*200*150***1**1**Y
                             # e1 composite: procedure_code (e1:e2 format: plan:procedure_code)
-                            # e3=billed, e4=allowed
+                            # e2=dental service fee, e3=billed, e4=allowed (NOT paid)
                             svc_segment = seg
                             raw_e1 = self._seg_get(seg, 1) or ""
                             # Composite format: "AD:D2740" or just "D2740"
@@ -1639,7 +1657,6 @@ class X12Parser:
                             dental_procedure_code = proc_code
                             try:
                                 sv_billed += float(self._seg_get(seg, 3) or "0")
-                                sv_paid += float(self._seg_get(seg, 4) or "0")
                             except ValueError:
                                 pass
                         elif seg.tag == "TOO":
@@ -1651,8 +1668,8 @@ class X12Parser:
                         elif seg.tag in ("UR1", "UREF"):
                             # UR1/UREF = Oral Cavity Designator segment
                             # UR1*UR*08*08*08*08*08*08*08*08
-                            # e1=code (UR/UE), e2+=cavity codes
-                            for e_idx in range(2, len(seg.elements) + 1):
+                            # e1=code (UR/UE), e2=cavity designator code, e3+=cavity IDs
+                            for e_idx in range(3, len(seg.elements) + 1):
                                 val = self._seg_get(seg, e_idx)
                                 if val:
                                     dental_oral_cavity.append(val)

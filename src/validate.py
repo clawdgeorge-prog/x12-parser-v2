@@ -477,8 +477,9 @@ class X12Validator:
                             "SVC", seg.position,
                         )
             elif seg.tag == "CAS":
-                # CAS repeating group: e1=group code, then (e2=reason, e3=amount, e4=quantity) repeating
-                # So amounts are at indices 2, 5, 8, 11, 14, 17; quantities at 3, 6, 9, 12, 15, 18
+                # CAS repeating group: e1=group_code, then (e2=reason, e3=amount, e4=quantity) repeating
+                # 1-indexed element positions: amounts at 3,6,9,12,15,18; quantities at 4,7,10,13,16,19
+                # Python 0-indexed: amounts at [2,5,8,11,14,17]; quantities at [3,6,9,12,15,18]
                 amount_indices = [2, 5, 8, 11, 14, 17]
                 qty_indices = [3, 6, 9, 12, 15, 18]
                 for e_idx in amount_indices:
@@ -649,7 +650,7 @@ class X12Validator:
                     for loop in ts.get("loops", []):
                         for seg in loop.get("segments", []):
                             if seg["tag"] == "CLP":
-                                status = seg["elements"].get("e3", "").strip()
+                                status = seg["elements"].get("e2", "").strip()
                                 if status and not status.isdigit():
                                     result.add_warning(
                                         "CLP_STATUS_INVALID",

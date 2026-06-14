@@ -50,7 +50,8 @@ class TestExternal835Samples:
         result = validate_external("hdi_835_all_fields.dat")
         c = codes(result)
         assert "SE_COUNT_MISMATCH" in c
-        assert "CLP_STATUS_OUT_OF_RANGE" in c
+        # Note: CLP_STATUS_OUT_OF_RANGE does NOT fire for this file because
+        # CLP e2=1 (status code) is valid — the old bug was reading e3 (billed amount)
         # BPR_CLP_SUM_MISMATCH may or may not fire depending on balancing logic
 
     def test_hdi_835_denial_parses_without_crash(self):

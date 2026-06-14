@@ -692,7 +692,7 @@ class TestValidateCLPStatusCodes:
         v = X12Validator(p)
         r = v.validate()
         codes_w = {i.code for i in r.issues if i.severity == "warning"}
-        assert "CLP_STATUS_INVALID" in codes_w
+        assert "CLP_STATUS_OUT_OF_RANGE" in codes_w
 
     def test_clp_status_out_of_range_warns(self):
         edi_bad_status = (

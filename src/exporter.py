@@ -342,6 +342,7 @@ def _build_835_claim_records(data: dict) -> Iterator[dict]:
                                 if current_claim is not None:
                                     yield _finalize_claim_row(current_claim)
                                 current_entity = ""
+                                current_lx = ""
                                 current_claim = _new_claim_row(_safe(elements.get("e1", "")))
                                 current_claim["lx_number"] = current_lx
                                 current_claim["status_code"] = _safe(elements.get("e2", current_claim.get("status_code", ""))) or _safe(current_claim.get("status_code", ""))

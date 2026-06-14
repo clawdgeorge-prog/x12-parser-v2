@@ -205,7 +205,7 @@ def reconcile_data(data: dict, reference_claims: Iterable[dict] | None = None, t
         "total_paid_amount": total_paid,
         "tolerance": tolerance,
         "reference_claim_count": len(reference_claims),
-        "match_rate": round((len(matched_payments) / len(reference_claims)), 4) if reference_claims else 1.0,
+        "match_rate": round((len(matched_payments) / len(reference_claims)), 4) if len(reference_claims) > 0 else 1.0,
     }
 
     return ReconciliationResult(

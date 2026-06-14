@@ -168,16 +168,22 @@ def main() -> None:
         indent = None if args.compact else 2
         text = json.dumps(data, indent=indent, ensure_ascii=False)
         if args.output:
-            args.output.write_text(text)
-            print(f"[OK] Written: {args.output}")
+            out_path = args.output
+            if out_path.is_dir():
+                out_path = out_path / "batch.json"
+            out_path.write_text(text)
+            print(f"[OK] Written: {out_path}")
         else:
             print(text)
 
     elif args.format == "ndjson":
         if args.output:
-            with open(args.output, "w") as f:
+            out_path = args.output
+            if out_path.is_dir():
+                out_path = out_path / "batch.ndjson"
+            with open(out_path, "w") as f:
                 count = exporter.emit_ndjson(data, file=f)
-            print(f"[OK] Written {count} NDJSON records: {args.output}")
+            print(f"[OK] Written {count} NDJSON records: {out_path}")
         else:
             exporter.emit_ndjson(data)
 
